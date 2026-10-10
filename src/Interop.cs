@@ -4,6 +4,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace MiniAudio
 {
@@ -162,6 +163,27 @@ namespace MiniAudio
         public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2, DWMWCP_ROUNDSMALL = 3;
         public const int WS_EX_TOPMOST = 0x8, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000;
         public const int CS_DROPSHADOW = 0x20000;
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr OpenProcess(int access, bool inherit, int pid);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        static extern bool QueryFullProcessImageName(IntPtr process, int flags, StringBuilder path, ref int size);
+        [DllImport("kernel32.dll")]
+        static extern bool CloseHandle(IntPtr handle);
+
+        // Works for most processes without admin rights (PROCESS_QUERY_LIMITED_INFORMATION)
+        public static string ProcessImagePath(int pid)
+        {
+            IntPtr h = OpenProcess(0x1000, false, pid);
+            if (h == IntPtr.Zero) return null;
+            try
+            {
+                var sb = new StringBuilder(1024);
+                int size = sb.Capacity;
+                return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : null;
+            }
+            finally { CloseHandle(h); }
+        }
 
         public static void RoundCorners(IntPtr hwnd, bool small)
         {

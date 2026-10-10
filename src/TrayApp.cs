@@ -32,6 +32,7 @@ namespace MiniAudio
 
         readonly Config config;
         readonly AudioService audio;
+        readonly AppAudioService appAudio;
         readonly Control invoker;
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu;
@@ -58,7 +59,8 @@ namespace MiniAudio
             audio.DevicesChanged += ScheduleEvaluate;
 
             osd = new Osd();
-            flyout = new Flyout(audio, config);
+            appAudio = new AppAudioService(audio, config);
+            flyout = new Flyout(audio, appAudio, config);
             flyout.SwitchRequested += delegate(AudioDevice d) { if (SwitchTo(d, null)) flyout.RefreshDevices(); };
             flyout.SettingsRequested += OpenSettings;
             flyout.AutoToggled += delegate { config.Auto = !config.Auto; config.Save(); };
@@ -80,7 +82,7 @@ namespace MiniAudio
 
             poll = new Timer(); // refresh icon/tooltip after volume keys etc.
             poll.Interval = 1000;
-            poll.Tick += delegate { UpdateTray(); };
+            poll.Tick += delegate { OnPoll(); };
             poll.Start();
 
             bool firstRun = config.IsNew;
@@ -93,6 +95,16 @@ namespace MiniAudio
                     "Click the icon to manage devices and volume. Right-click: menu, middle-click: mute.",
                     ToolTipIcon.Info);
             }
+        }
+
+        int pollCount;
+
+        void OnPoll()
+        {
+            UpdateTray();
+            // Windows does not keep per-app channel volumes for new sessions: re-apply saved balances
+            // to apps that start playing (the flyout does this itself while open)
+            if (++pollCount % 3 == 0 && config.Balances.Count > 0 && !flyout.Visible) appAudio.GetApps();
         }
 
         // ---- auto switching ----
