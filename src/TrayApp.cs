@@ -102,7 +102,7 @@ namespace MiniAudio
         void OnPoll()
         {
             UpdateTray();
-            // Windows does not keep per-app channel volumes for new sessions: re-apply saved balances
+            // Re-apply saved balances to new sessions (Windows is not relied on to keep channel volumes)
             // to apps that start playing (the flyout does this itself while open)
             if (++pollCount % 3 == 0 && config.Balances.Count > 0 && !flyout.Visible) appAudio.GetApps();
         }
