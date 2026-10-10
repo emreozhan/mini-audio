@@ -58,7 +58,7 @@ namespace MiniAudio
             }
         }
 
-        object Activate(Guid iid)
+        internal object Activate(Guid iid)
         {
             try
             {

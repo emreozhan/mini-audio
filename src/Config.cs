@@ -47,6 +47,7 @@ namespace MiniAudio
         public bool ShowOsd = true;       // on-screen notice on switch
         public string Hotkey = "ctrl+alt+s";
         public List<DeviceEntry> Outputs = new List<DeviceEntry>();
+        public Dictionary<string, float> Balances = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase); // app exe -> -1..1
         public bool IsNew = true;
 
         static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MiniAudio"); } }
@@ -84,6 +85,13 @@ namespace MiniAudio
                         case "showMics": c.ShowMics = v == "1"; break;
                         case "showOsd": c.ShowOsd = v == "1"; break;
                         case "hotkey": c.Hotkey = v; break;
+                        case "bal":
+                            int sep = v.LastIndexOf('|');
+                            float b;
+                            if (sep > 0 && float.TryParse(v.Substring(sep + 1), System.Globalization.NumberStyles.Float,
+                                    System.Globalization.CultureInfo.InvariantCulture, out b))
+                                c.Balances[v.Substring(0, sep)] = Math.Max(-1f, Math.Min(1f, b));
+                            break;
                         case "out":
                             string[] p = v.Split(new[] { '|' }, 3);
                             if (p.Length == 3 && p[0].Length > 0 && c.Find(p[0]) == null)
@@ -109,6 +117,8 @@ namespace MiniAudio
             lines.Add("hotkey=" + Hotkey);
             foreach (var e in Outputs)
                 lines.Add("out=" + e.Id + "|" + B(e.Included) + "|" + (e.Name ?? "").Replace("\r", " ").Replace("\n", " "));
+            foreach (var kv in Balances)
+                lines.Add("bal=" + kv.Key + "|" + kv.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
             try
             {
                 Directory.CreateDirectory(Dir);

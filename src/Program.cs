@@ -95,6 +95,65 @@ namespace MiniAudio
                 return ok ? 0 : 1;
             }
 
+            if (cmd == "--apps")
+            {
+                var apps = new AppAudioService(audio, config);
+                if (!AppRouting.Available) Console.WriteLine("(per-app output routing is not available on this Windows version)");
+                foreach (var a in apps.GetApps())
+                {
+                    var routed = a.RouteId != null ? audio.GetDevice(a.RouteId) : null;
+                    float v = a.GetVolume();
+                    Console.WriteLine("  {0} {1,-28} {2,4}  bal {3,5:0.00}  -> {4}  [{5}]", a.Active ? ">" : " ", a.Name,
+                        v < 0 ? "-" : ((int)Math.Round(v * 100)) + "%", a.GetBalance(),
+                        a.IsSystem ? "-" : routed != null ? routed.Name : "Default", a.Key);
+                }
+                Console.WriteLine("  (> playing now)");
+                return 0;
+            }
+
+            if (cmd == "--route" && args.Length > 2)
+            {
+                // --route <app> <device name|id|default>
+                var apps = new AppAudioService(audio, config);
+                AppSession app = null;
+                foreach (var a in apps.GetApps())
+                    if (app == null && !a.IsSystem && (a.Key.IndexOf(args[1], StringComparison.OrdinalIgnoreCase) >= 0
+                        || a.Name.IndexOf(args[1], StringComparison.CurrentCultureIgnoreCase) >= 0))
+                        app = a;
+                if (app == null) { Console.WriteLine("No app with an audio session matches: " + args[1]); return 1; }
+                string q = string.Join(" ", args, 2, args.Length - 2);
+                AudioDevice target = null;
+                if (!string.Equals(q, "default", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var d in audio.GetDevices(EDataFlow.Render, DeviceState.Active))
+                        if (target == null && (string.Equals(d.Id, q, StringComparison.OrdinalIgnoreCase)
+                            || d.FriendlyName.IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0
+                            || d.Name.IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0))
+                            target = d;
+                    if (target == null) { Console.WriteLine("No matching active output: " + q); return 1; }
+                }
+                bool ok = apps.SetRoute(app, target != null ? target.Id : null);
+                Console.WriteLine((ok ? "Routed: " : "Failed: ") + app.Name + " -> " + (target != null ? target.Name : "Default"));
+                return ok ? 0 : 1;
+            }
+
+            if (cmd == "--balance" && args.Length > 2)
+            {
+                // --balance <app> <-100..100>  (negative = left, positive = right, 0 = center)
+                var apps = new AppAudioService(audio, config);
+                AppSession app = null;
+                foreach (var a in apps.GetApps())
+                    if (app == null && (a.Key.IndexOf(args[1], StringComparison.OrdinalIgnoreCase) >= 0
+                        || a.Name.IndexOf(args[1], StringComparison.CurrentCultureIgnoreCase) >= 0))
+                        app = a;
+                int pct;
+                if (app == null || !int.TryParse(args[2], out pct)) { Console.WriteLine("Usage: --balance <app> <-100..100>"); return 1; }
+                if (!app.HasBalance) { Console.WriteLine(app.Name + " has no stereo channels to balance."); return 1; }
+                apps.SetBalance(app, Math.Max(-100, Math.Min(100, pct)) / 100f);
+                Console.WriteLine("Balance: " + app.Name + " = " + app.GetBalance().ToString("0.00"));
+                return 0;
+            }
+
             if (cmd == "--snapshot" && args.Length > 1)
             {
                 // Renders the UI to PNG (development check); does not write settings
@@ -105,8 +164,9 @@ namespace MiniAudio
                 {
                     Theme.ForceDark = dark;
                     string sfx = dark ? "-dark.png" : "-light.png";
-                    using (var f = new Flyout(audio, config))
-                    using (var b = f.Snapshot()) b.Save(System.IO.Path.Combine(dir, "flyout" + sfx));
+                    foreach (FlyoutTab t in new[] { FlyoutTab.Devices, FlyoutTab.Apps })
+                        using (var f = new Flyout(audio, new AppAudioService(audio, config), config))
+                        using (var b = f.Snapshot(t)) b.Save(System.IO.Path.Combine(dir, "flyout-" + t.ToString().ToLowerInvariant() + sfx));
                     var dev = audio.GetDefault(EDataFlow.Render);
                     using (var o = new Osd())
                     using (var b = o.Snapshot(Glyphs.ForDevice(dev), dev != null ? dev.Name : "?", "Connected · now the default output"))
@@ -130,7 +190,7 @@ namespace MiniAudio
                 return 0;
             }
 
-            Console.WriteLine("Usage: MiniAudio.exe [--list | --switch <name|id> | --next]");
+            Console.WriteLine("Usage: MiniAudio.exe [--list | --switch <name|id> | --next | --apps | --route <app> <device|default> | --balance <app> <-100..100>]");
             return 2;
         }
     }
