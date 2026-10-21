@@ -2,6 +2,8 @@
 
 Small Windows tray app for switching between audio outputs (USB dongle headset, Bluetooth speaker, …), routing individual apps to different outputs, and managing volume and balance. Single EXE, no installation, built with the C# compiler that ships with Windows.
 
+![MiniAudio: the Devices and Apps flyouts, auto switching, next-device hotkey, software volume and command line](promo/miniaudio-4x3.png)
+
 ## Features
 
 - **Devices tab** (left-click the tray icon): every active output and input with its own volume slider, mute button and live level meter. Click a device's name to make it the default; the mouse wheel over a row changes its volume. The toggle at the bottom turns auto switching on or off, the gear opens the settings.
@@ -42,6 +44,15 @@ The channel math behind balance and software volume has tests. Build and run the
 ```bat
 C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /codepage:65001 /target:exe /main:MiniAudio.Tests.TestRunner /out:MiniAudioTests.exe src\*.cs tests\*.cs
 MiniAudioTests.exe
+```
+
+### Promo image
+
+`promo/miniaudio-4x3.png` (1600×1200) is rendered from `promo/miniaudio-4x3.html` with headless Edge. The flyout pictures in it come from the app itself: `--snapshot` renders the flyout, the on-screen notice and the settings window to PNG files (dark and light) without changing any setting. From the repository root:
+
+```bat
+MiniAudio.exe --snapshot promo\snapshots
+"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --headless --disable-gpu --hide-scrollbars --window-size=1600,1200 --screenshot="%CD%\promo\miniaudio-4x3.png" "file:///%CD%/promo/miniaudio-4x3.html"
 ```
 
 ## Command line
