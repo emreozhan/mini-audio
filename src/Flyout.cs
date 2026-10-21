@@ -653,8 +653,9 @@ namespace MiniAudio
             }
             DrawText(g, r.Dev.Name, r.IsDefault ? fontNameBold : fontName, theme.Text,
                 new Rectangle(tx, r.Bounds.Y + S(5), right - tx - badgeW, S(20)), TextFormatFlags.VerticalCenter);
-            DrawText(g, r.Dev.Detail, fontSmall, theme.SubText,
-                new Rectangle(tx, r.Bounds.Y + S(23), right - tx, S(17)), TextFormatFlags.VerticalCenter);
+            bool soft = string.Equals(appAudio.SoftwareDeviceId, r.Dev.Id, StringComparison.OrdinalIgnoreCase);
+            DrawText(g, soft ? r.Dev.Detail + " · Software volume" : r.Dev.Detail, fontSmall, soft ? theme.Accent : theme.SubText,
+                new Rectangle(tx, r.Bounds.Y + S(23), right - tx, S(17)), TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
 
         void DrawAppHeader(Graphics g, Row r, bool hover, int tx, int right)

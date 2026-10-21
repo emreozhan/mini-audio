@@ -64,6 +64,52 @@ namespace MiniAudio
 
     static class SessionState { public const int Inactive = 0, Active = 1, Expired = 2; }
 
+    // Session channel volumes carry the balance (channels 0/1) and, with software volume, a gain on every channel.
+    // Without software volume the loudest channel of a session is always 1.
+    static class ChannelMath
+    {
+        // Linear gain for an endpoint level in dB, so software volume sounds like the device's own volume control
+        public static float GainFromDb(float db)
+        {
+            if (float.IsNaN(db)) return 1f;
+            return (float)Math.Max(0.0, Math.Min(1.0, Math.Pow(10.0, db / 20.0)));
+        }
+
+        // -1 = fully left, 0 = center, 1 = fully right; channels after the first two (center, surround) get only the gain
+        public static float[] Levels(float balance, float gain, int count)
+        {
+            if (count <= 0) return new float[0];
+            balance = Math.Max(-1f, Math.Min(1f, balance));
+            gain = Math.Max(0f, Math.Min(1f, gain));
+            var levels = new float[count];
+            for (int i = 0; i < count; i++) levels[i] = gain;
+            if (count >= 2)
+            {
+                levels[0] = (balance > 0 ? 1f - balance : 1f) * gain;
+                levels[1] = (balance < 0 ? 1f + balance : 1f) * gain;
+            }
+            return levels;
+        }
+
+        // Balance from the left/right channel volumes; independent of any gain applied to both
+        public static float Balance(float left, float right)
+        {
+            float max = Math.Max(left, right);
+            if (max <= 1e-9f || Math.Abs(left - right) < 0.005f * max) return 0f;
+            return left > right ? right / left - 1f : 1f - left / right;
+        }
+
+        // Removes a gain: scales the levels so the loudest channel is 1 again (keeps the balance)
+        public static float[] Normalize(float[] levels)
+        {
+            float max = 0f;
+            foreach (float v in levels) max = Math.Max(max, v);
+            var result = new float[levels.Length];
+            for (int i = 0; i < levels.Length; i++) result[i] = max <= 1e-9f ? 1f : Math.Min(1f, levels[i] / max);
+            return result;
+        }
+    }
+
     // One audio session of a process on one output device
     class SessionHandle
     {
@@ -74,6 +120,7 @@ namespace MiniAudio
         public ISimpleAudioVolume Volume;
         public IChannelAudioVolume Channels;
         public IAudioMeterInformation Meter;
+        public float Gain = 1f; // software volume of its device, 1 when off
     }
 
     // An app, i.e. all sessions of the same executable across all output devices
@@ -148,8 +195,7 @@ namespace MiniAudio
                     if (h.Channels.GetChannelVolume(0, out l) != 0 || h.Channels.GetChannelVolume(1, out r) != 0) continue;
                 }
                 catch { continue; }
-                if (Math.Abs(l - r) < 0.005f) return 0f;
-                return l > r ? r / l - 1f : 1f - l / r;
+                return ChannelMath.Balance(l, r);
             }
             return 0f;
         }
@@ -159,22 +205,39 @@ namespace MiniAudio
             foreach (var h in Handles) ApplyBalance(h, balance);
         }
 
+        // Channels 0/1 are front left/right; every channel also carries the session's software volume gain
         internal static void ApplyBalance(SessionHandle h, float balance)
         {
-            balance = Math.Max(-1f, Math.Min(1f, balance));
-            if (ChannelCount(h) < 2) return;
-            float left = balance > 0 ? 1f - balance : 1f;
-            float right = balance < 0 ? 1f + balance : 1f;
+            SetChannels(h, ChannelMath.Levels(balance, h.Gain, ChannelCount(h)));
+        }
+
+        internal static float[] GetChannels(SessionHandle h)
+        {
+            var levels = new float[ChannelCount(h)];
             try
             {
-                // Channels 0/1 are front left/right; other channels (center, surround) are left alone
-                h.Channels.SetChannelVolume(0, left, ref noContext);
-                h.Channels.SetChannelVolume(1, right, ref noContext);
+                for (int i = 0; i < levels.Length; i++)
+                    if (h.Channels.GetChannelVolume(i, out levels[i]) != 0) return null;
+            }
+            catch { return null; }
+            return levels;
+        }
+
+        internal static void SetChannels(SessionHandle h, float[] levels)
+        {
+            try
+            {
+                for (int i = 0; i < levels.Length; i++)
+                {
+                    float cur;
+                    if (h.Channels.GetChannelVolume(i, out cur) != 0 || Math.Abs(cur - levels[i]) > 0.0001f)
+                        h.Channels.SetChannelVolume(i, levels[i], ref noContext);
+                }
             }
             catch { }
         }
 
-        static int ChannelCount(SessionHandle h)
+        internal static int ChannelCount(SessionHandle h)
         {
             int n;
             try { return h.Channels != null && h.Channels.GetChannelCount(out n) == 0 ? n : 0; }
@@ -187,7 +250,12 @@ namespace MiniAudio
         readonly AudioService audio;
         readonly Config config;
         readonly Dictionary<string, SessionHandle> handles = new Dictionary<string, SessionHandle>(StringComparer.OrdinalIgnoreCase);
-        readonly HashSet<string> balanceApplied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        readonly HashSet<string> prepared = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // sessions whose channels were set up
+        float softGain = 1f;
+
+        // Output whose volume is also applied on this PC (to every session's channels), for devices that
+        // accept but ignore volume changes. Lives only while MiniAudio runs; null = off.
+        public string SoftwareDeviceId { get; private set; }
         readonly Dictionary<int, string> pathByPid = new Dictionary<int, string>();
         readonly Dictionary<string, string> nameByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, Bitmap> iconByPath = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
@@ -200,7 +268,8 @@ namespace MiniAudio
         }
 
         // All apps with an open (active or inactive) audio session, sorted by name; system sounds last.
-        // Also re-applies saved balances to sessions seen for the first time.
+        // Sessions seen for the first time get their saved balance, or their full level back when an earlier
+        // software volume left them lowered (Windows remembers channel volumes per app).
         public List<AppSession> GetApps()
         {
             var groups = new Dictionary<string, AppSession>(StringComparer.OrdinalIgnoreCase);
@@ -208,12 +277,11 @@ namespace MiniAudio
 
             foreach (var dev in audio.GetDevices(EDataFlow.Render, DeviceState.Active))
             {
-                var mgr = Manager(dev);
-                if (mgr == null) continue;
-                IAudioSessionEnumerator en;
+                IAudioSessionEnumerator en = Sessions(dev);
                 int count;
-                try { if (mgr.GetSessionEnumerator(out en) != 0 || en == null || en.GetCount(out count) != 0) continue; }
+                try { if (en == null || en.GetCount(out count) != 0) continue; }
                 catch { continue; }
+                bool soft = IsSoftware(dev.Id);
 
                 for (int i = 0; i < count; i++)
                 {
@@ -250,6 +318,7 @@ namespace MiniAudio
                     }
                     h.Pid = pid;
                     h.State = state;
+                    h.Gain = soft ? softGain : 1f;
 
                     AppSession app;
                     if (!groups.TryGetValue(key, out app))
@@ -265,17 +334,20 @@ namespace MiniAudio
                     if (!system && pid > 0 && !app.Pids.Contains(pid)) app.Pids.Add(pid);
                     if (state == SessionState.Active) app.Active = true;
 
-                    float bal;
-                    if (!balanceApplied.Contains(handleKey) && config.Balances.TryGetValue(key, out bal))
-                        AppSession.ApplyBalance(h, bal);
-                    balanceApplied.Add(handleKey);
+                    if (!prepared.Contains(handleKey))
+                    {
+                        float bal;
+                        if (config.Balances.TryGetValue(key, out bal)) AppSession.ApplyBalance(h, bal);
+                        else if (!soft) RestoreFullLevel(h);
+                        prepared.Add(handleKey);
+                    }
                 }
             }
 
             // forget sessions that disappeared
             var stale = new List<string>();
             foreach (var k in handles.Keys) if (!seen.Contains(k)) stale.Add(k);
-            foreach (var k in stale) { handles.Remove(k); balanceApplied.Remove(k); }
+            foreach (var k in stale) { handles.Remove(k); prepared.Remove(k); }
 
             var list = new List<AppSession>(groups.Values);
             foreach (var a in list)
@@ -305,13 +377,107 @@ namespace MiniAudio
             config.Save();
         }
 
-        IAudioSessionManager2 Manager(AudioDevice dev)
+        // ---- software volume ----
+
+        // Turns software volume on for one output, or off (null). Sessions of a device that leaves
+        // software volume get their full level back.
+        public void SetSoftwareVolume(AudioDevice dev)
         {
-            IAudioSessionManager2 m;
-            if (managers.TryGetValue(dev.Id, out m) && m != null) return m;
-            m = dev.Activate(typeof(IAudioSessionManager2).GUID) as IAudioSessionManager2;
-            managers[dev.Id] = m;
-            return m;
+            string id = dev != null ? dev.Id : null;
+            if (string.Equals(id, SoftwareDeviceId, StringComparison.OrdinalIgnoreCase)) return;
+            string old = SoftwareDeviceId;
+            SoftwareDeviceId = null;
+            softGain = 1f;
+            if (old != null) ApplyGain(old, 1f);
+            if (dev == null) return;
+            SoftwareDeviceId = id;
+            ApplySoftwareVolume();
+        }
+
+        // Applies the device's current volume to every session on it; called about every 100 ms while on.
+        // Returns false (and turns software volume off) when the device is gone.
+        public bool ApplySoftwareVolume()
+        {
+            if (SoftwareDeviceId == null) return false;
+            var dev = audio.GetDevice(SoftwareDeviceId);
+            if (dev == null || !dev.IsActive)
+            {
+                // its sessions are gone; anything left lowered is restored when the apps show up again
+                SoftwareDeviceId = null;
+                softGain = 1f;
+                return false;
+            }
+            float db = dev.GetVolumeDb();
+            if (!float.IsNaN(db)) softGain = ChannelMath.GainFromDb(db);
+            ApplyGain(SoftwareDeviceId, softGain);
+            return true;
+        }
+
+        bool IsSoftware(string deviceId)
+        {
+            return SoftwareDeviceId != null && string.Equals(deviceId, SoftwareDeviceId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Sets every live session on the device to its balance (read from its channels) times gain
+        void ApplyGain(string deviceId, float gain)
+        {
+            foreach (var h in handles.Values)
+                if (h.InstanceId.StartsWith(deviceId + "|", StringComparison.OrdinalIgnoreCase)) h.Gain = gain;
+
+            var dev = audio.GetDevice(deviceId);
+            IAudioSessionEnumerator en = dev != null && dev.IsActive ? Sessions(dev) : null;
+            int count;
+            try { if (en == null || en.GetCount(out count) != 0) return; }
+            catch { return; }
+            for (int i = 0; i < count; i++)
+            {
+                IAudioSessionControl2 c;
+                int state;
+                try
+                {
+                    if (en.GetSession(i, out c) != 0 || c == null) continue;
+                    if (c.GetState(out state) != 0 || state == SessionState.Expired) continue;
+                }
+                catch { continue; }
+                var h = new SessionHandle { Channels = c as IChannelAudioVolume, Gain = gain };
+                var levels = AppSession.GetChannels(h);
+                if (levels == null || levels.Length == 0) continue;
+                var target = ChannelMath.Normalize(levels);
+                for (int k = 0; k < target.Length; k++) target[k] *= gain;
+                AppSession.SetChannels(h, target);
+            }
+        }
+
+        // A session left lowered by an earlier software volume (e.g. MiniAudio quit unexpectedly) gets its
+        // full level back; without software volume the loudest channel is always 1
+        static void RestoreFullLevel(SessionHandle h)
+        {
+            var levels = AppSession.GetChannels(h);
+            if (levels == null || levels.Length == 0) return;
+            float max = 0f;
+            foreach (float v in levels) max = Math.Max(max, v);
+            if (max < 0.995f) AppSession.SetChannels(h, ChannelMath.Normalize(levels));
+        }
+
+        // Session list of a device. A cached session manager goes stale when the device is unplugged and
+        // plugged back in; it is then activated again.
+        IAudioSessionEnumerator Sessions(AudioDevice dev)
+        {
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                IAudioSessionManager2 m;
+                if (!managers.TryGetValue(dev.Id, out m) || m == null)
+                {
+                    m = dev.Activate(typeof(IAudioSessionManager2).GUID) as IAudioSessionManager2;
+                    managers[dev.Id] = m;
+                    if (m == null) return null;
+                }
+                IAudioSessionEnumerator en;
+                try { if (m.GetSessionEnumerator(out en) == 0 && en != null) return en; }
+                catch { }
+                managers.Remove(dev.Id);
+            }
+            return null;
         }
 
         string ProcessPath(int pid)
