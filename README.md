@@ -17,7 +17,7 @@ Small Windows tray app for switching between audio outputs (USB dongle headset, 
   - Monitor/HDMI audio and Bluetooth "Hands-Free" outputs are unchecked by default.
 - **Next-device hotkey** (default `Ctrl+Alt+S`, can be changed or turned off): cycles through the checked outputs and shows a short on-screen notice.
 - The communications (call) device is switched together with the default device (can be turned off). Optionally the matching microphone is switched too.
-- **Software volume** (right-click the tray icon → *Software volume*): for an output whose own volume control stops working, e.g. a wireless headset dongle that accepts volume changes but ignores them. While it is on, the volume keys and Windows' volume slider also lower the sound on this PC, so they work again. Applies to the current default output and ends when MiniAudio closes or the device disconnects; nothing is saved. See the notes below.
+- **Software volume** (the toggle at the bottom of the flyout, or right-click the tray icon → *Software volume*): for an output whose own volume control stops working, e.g. a wireless headset dongle that accepts volume changes but ignores them. While it is on, the volume keys and Windows' volume slider also lower the sound on this PC, so they work again. The tray icon is drawn in the Windows accent color while it is on, so you can tell without opening anything. Applies to the current default output and ends when MiniAudio closes or the device disconnects; nothing is saved. See the notes below.
 - Middle-click the tray icon to mute/unmute the default output.
 - Follows the Windows light/dark theme and accent color.
 
@@ -48,7 +48,7 @@ MiniAudioTests.exe
 
 ### Promo image
 
-`promo/miniaudio-4x3.png` (1600×1200) is rendered from `promo/miniaudio-4x3.html` with headless Edge. The flyout pictures in it come from the app itself: `--snapshot` renders the flyout, the on-screen notice and the settings window to PNG files (dark and light) without changing any setting. From the repository root:
+`promo/miniaudio-4x3.png` (1600×1200) is rendered from `promo/miniaudio-4x3.html` with headless Edge. The pictures in it come from the app itself: `--snapshot` renders the flyout (also with software volume shown as on), the tray icon, the on-screen notice and the settings window to PNG files (dark and light) without changing any setting or level. The snapshots show the devices and apps present at that moment, and the highlight boxes in the page's script are tuned to the committed pictures; adjust them after taking new ones. From the repository root:
 
 ```bat
 MiniAudio.exe --snapshot promo\snapshots
@@ -93,6 +93,6 @@ Settings are stored in `%APPDATA%\MiniAudio\config.txt`.
 - Some 2.4 GHz dongles keep their audio endpoint active even when the headset is switched off, so Windows reports no "connected" event for them. Use the flyout or the hotkey in that case.
 - **Software volume, in detail.** Many USB headsets apply volume in the device: Windows sends the new level to the dongle and does not lower the sound itself. Some dongles (seen with an Arctis Nova 7 Gen 2, typically after sleep) acknowledge these changes but stop applying them until they are unplugged; mute keeps working because Windows applies it on the PC. With software volume on, MiniAudio reads the device's level in dB and applies the same level to the channel volumes of every app playing on that device, about every 100 ms. App volumes and left/right balance stay as you set them.
   - Use it only while the device ignores volume changes. If the device works normally, the level is applied twice and the sound is quieter than the slider suggests; turn it off then.
-  - It ends when MiniAudio closes, when Windows shuts down or signs out, and when the device disconnects (unplugging usually fixes the dongle). Apps get their full level back.
+  - It ends when MiniAudio closes, when Windows shuts down or signs out, and when the device disconnects (unplugging usually fixes the dongle). Apps get their full level back, so if the device still ignores volume changes at that moment, the sound gets as loud as the device is set.
   - Windows remembers channel volumes per app. If MiniAudio is closed unexpectedly while software volume is on, apps left lowered get their full level back the next time MiniAudio sees them.
   - Apps that use exclusive mode bypass Windows' mixer and are not affected.

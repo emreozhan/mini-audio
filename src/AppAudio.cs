@@ -99,14 +99,17 @@ namespace MiniAudio
             return left > right ? right / left - 1f : 1f - left / right;
         }
 
-        // Removes a gain: scales the levels so the loudest channel is 1 again (keeps the balance)
-        public static float[] Normalize(float[] levels)
+        // Channel levels for a session seen for the first time, or null to leave it alone: its saved balance,
+        // or its full level back when an earlier software volume left it lowered (Windows remembers channel
+        // volumes per app). On a software volume device the timer sets the levels.
+        public static float[] ForNewSession(float[] levels, float? balance, bool softwareVolume, float gain)
         {
+            if (levels == null || levels.Length == 0) return null;
+            if (balance.HasValue) return Levels(balance.Value, gain, levels.Length);
+            if (softwareVolume) return null;
             float max = 0f;
             foreach (float v in levels) max = Math.Max(max, v);
-            var result = new float[levels.Length];
-            for (int i = 0; i < levels.Length; i++) result[i] = max <= 1e-9f ? 1f : Math.Min(1f, levels[i] / max);
-            return result;
+            return max < 0.995f ? Levels(0f, 1f, levels.Length) : null;
         }
     }
 
@@ -249,6 +252,7 @@ namespace MiniAudio
     {
         readonly AudioService audio;
         readonly Config config;
+        readonly bool ownsLevels;
         readonly Dictionary<string, SessionHandle> handles = new Dictionary<string, SessionHandle>(StringComparer.OrdinalIgnoreCase);
         readonly HashSet<string> prepared = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // sessions whose channels were set up
         float softGain = 1f;
@@ -261,15 +265,17 @@ namespace MiniAudio
         readonly Dictionary<string, Bitmap> iconByPath = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, IAudioSessionManager2> managers = new Dictionary<string, IAudioSessionManager2>(StringComparer.OrdinalIgnoreCase);
 
-        public AppAudioService(AudioService audio, Config config)
+        // ownsLevels: true in the tray app, which sets up the channels of new sessions (saved balance, leftovers of
+        // software volume). The command line leaves levels alone unless asked, so it never fights the tray app.
+        public AppAudioService(AudioService audio, Config config, bool ownsLevels)
         {
             this.audio = audio;
             this.config = config;
+            this.ownsLevels = ownsLevels;
         }
 
         // All apps with an open (active or inactive) audio session, sorted by name; system sounds last.
-        // Sessions seen for the first time get their saved balance, or their full level back when an earlier
-        // software volume left them lowered (Windows remembers channel volumes per app).
+        // In the tray app, sessions seen for the first time also get their channels set up (see ChannelMath.ForNewSession).
         public List<AppSession> GetApps()
         {
             var groups = new Dictionary<string, AppSession>(StringComparer.OrdinalIgnoreCase);
@@ -297,11 +303,10 @@ namespace MiniAudio
                     }
                     catch { continue; }
 
-                    bool system = false;
-                    try { system = c.IsSystemSoundsSession() == 0; } catch { }
-                    string path = system ? null : ProcessPath(pid);
-                    if (!system && path == null) continue; // process already gone
-                    string key = system ? "#system" : System.IO.Path.GetFileName(path).ToLowerInvariant();
+                    string path;
+                    string key = AppKey(c, pid, out path);
+                    if (key == null) continue; // process already gone
+                    bool system = path == null;
 
                     string handleKey = dev.Id + "|" + inst;
                     seen.Add(handleKey);
@@ -334,12 +339,12 @@ namespace MiniAudio
                     if (!system && pid > 0 && !app.Pids.Contains(pid)) app.Pids.Add(pid);
                     if (state == SessionState.Active) app.Active = true;
 
-                    if (!prepared.Contains(handleKey))
+                    if (ownsLevels && prepared.Add(handleKey))
                     {
                         float bal;
-                        if (config.Balances.TryGetValue(key, out bal)) AppSession.ApplyBalance(h, bal);
-                        else if (!soft) RestoreFullLevel(h);
-                        prepared.Add(handleKey);
+                        float? saved = config.Balances.TryGetValue(key, out bal) ? bal : (float?)null;
+                        var levels = ChannelMath.ForNewSession(AppSession.GetChannels(h), saved, soft, h.Gain);
+                        if (levels != null) AppSession.SetChannels(h, levels);
                     }
                 }
             }
@@ -369,12 +374,24 @@ namespace MiniAudio
             return ok;
         }
 
-        public void SetBalance(AppSession app, float balance)
+        // save: false while the slider is being dragged; the settings file is written once at the end
+        public void SetBalance(AppSession app, float balance, bool save)
         {
             if (Math.Abs(balance) < 0.005f) { balance = 0f; config.Balances.Remove(app.Key); }
             else config.Balances[app.Key] = balance;
             app.SetBalance(balance);
-            config.Save();
+            if (save) config.Save();
+        }
+
+        // "#system", or the lower-case exe name of the session's process (path is then set); null when the process is gone
+        string AppKey(IAudioSessionControl2 c, int pid, out string path)
+        {
+            path = null;
+            bool system = false;
+            try { system = c.IsSystemSoundsSession() == 0; } catch { }
+            if (system) return "#system";
+            path = ProcessPath(pid);
+            return path == null ? null : System.IO.Path.GetFileName(path).ToLowerInvariant();
         }
 
         // ---- software volume ----
@@ -418,7 +435,7 @@ namespace MiniAudio
             return SoftwareDeviceId != null && string.Equals(deviceId, SoftwareDeviceId, StringComparison.OrdinalIgnoreCase);
         }
 
-        // Sets every live session on the device to its balance (read from its channels) times gain
+        // Sets every live session on the device to its app's balance times gain
         void ApplyGain(string deviceId, float gain)
         {
             foreach (var h in handles.Values)
@@ -432,31 +449,27 @@ namespace MiniAudio
             for (int i = 0; i < count; i++)
             {
                 IAudioSessionControl2 c;
-                int state;
+                int state, pid;
                 try
                 {
                     if (en.GetSession(i, out c) != 0 || c == null) continue;
                     if (c.GetState(out state) != 0 || state == SessionState.Expired) continue;
+                    c.GetProcessId(out pid);
                 }
                 catch { continue; }
-                var h = new SessionHandle { Channels = c as IChannelAudioVolume, Gain = gain };
-                var levels = AppSession.GetChannels(h);
-                if (levels == null || levels.Length == 0) continue;
-                var target = ChannelMath.Normalize(levels);
-                for (int k = 0; k < target.Length; k++) target[k] *= gain;
-                AppSession.SetChannels(h, target);
+                string path;
+                ApplyLevels(new SessionHandle { Channels = c as IChannelAudioVolume, Gain = gain }, AppKey(c, pid, out path));
             }
         }
 
-        // A session left lowered by an earlier software volume (e.g. MiniAudio quit unexpectedly) gets its
-        // full level back; without software volume the loudest channel is always 1
-        static void RestoreFullLevel(SessionHandle h)
+        // Sets a session's channels from what MiniAudio knows (its app's balance, the session's gain) and not from
+        // their current values: a level changed behind MiniAudio's back is corrected, not taken for a balance.
+        // appKey null = session without a single process; it gets only the gain.
+        internal void ApplyLevels(SessionHandle h, string appKey)
         {
-            var levels = AppSession.GetChannels(h);
-            if (levels == null || levels.Length == 0) return;
-            float max = 0f;
-            foreach (float v in levels) max = Math.Max(max, v);
-            if (max < 0.995f) AppSession.SetChannels(h, ChannelMath.Normalize(levels));
+            float balance = 0f;
+            if (appKey != null) config.Balances.TryGetValue(appKey, out balance);
+            AppSession.ApplyBalance(h, balance);
         }
 
         // Session list of a device. A cached session manager goes stale when the device is unplugged and

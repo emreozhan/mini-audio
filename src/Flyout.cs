@@ -15,7 +15,7 @@ namespace MiniAudio
 
     class Flyout : Form
     {
-        enum Part { None, Header, Mute, Slider, Balance, AutoToggle, Gear, TabDevices, TabApps }
+        enum Part { None, Header, Mute, Slider, Balance, AutoToggle, SoftToggle, Gear, TabDevices, TabApps }
 
         class Row
         {
@@ -49,7 +49,7 @@ namespace MiniAudio
         List<Row> rows = new List<Row>();
         List<Section> sections = new List<Section>();
         string emptyText;
-        Rectangle tabs, tabDevices, tabApps, viewport, footer, autoToggle, gear;
+        Rectangle tabs, tabDevices, tabApps, viewport, footer, autoToggle, softToggle, gear;
         int contentHeight, scroll, maxViewport;
         int tickCount;
         bool menuOpen;
@@ -59,9 +59,15 @@ namespace MiniAudio
 
         public int LastHiddenTick { get; private set; }
 
+        public static string SnapshotSoftwareId; // --snapshot only: draws software volume as on for this device
+
+        // device software volume is on for; null = off
+        string SoftwareId { get { return SnapshotSoftwareId ?? appAudio.SoftwareDeviceId; } }
+
         public event Action<AudioDevice> SwitchRequested;
         public event Action SettingsRequested;
         public event Action AutoToggled;
+        public event Action SoftwareVolumeToggled;
 
         public Flyout(AudioService audio, AppAudioService appAudio, Config config)
         {
@@ -267,7 +273,8 @@ namespace MiniAudio
 
             int fy = top + vh;
             footer = new Rectangle(0, fy, w, S(48));
-            autoToggle = new Rectangle(pad + S(6), fy + S(12), S(190), S(24));
+            autoToggle = new Rectangle(pad + S(6), fy + S(12), S(124), S(24));
+            softToggle = new Rectangle(autoToggle.Right + S(12), fy + S(12), S(158), S(24));
             gear = new Rectangle(w - pad - S(36), fy + S(8), S(32), S(32));
             ClientSize = new Size(w, fy + footer.Height);
         }
@@ -336,6 +343,7 @@ namespace MiniAudio
             if (tabDevices.Contains(p)) { part = Part.TabDevices; return null; }
             if (tabApps.Contains(p)) { part = Part.TabApps; return null; }
             if (autoToggle.Contains(p)) { part = Part.AutoToggle; return null; }
+            if (softToggle.Contains(p)) { part = Part.SoftToggle; return null; }
             if (gear.Contains(p)) { part = Part.Gear; return null; }
             if (!viewport.Contains(p)) return null;
             foreach (var r in rows)
@@ -373,7 +381,7 @@ namespace MiniAudio
             {
                 hoverRow = r; hoverPart = part;
                 bool hand = part == Part.Mute || part == Part.Slider || part == Part.Balance || part == Part.AutoToggle
-                         || part == Part.Gear || part == Part.TabDevices || part == Part.TabApps
+                         || part == Part.SoftToggle || part == Part.Gear || part == Part.TabDevices || part == Part.TabApps
                          || (part == Part.Header && HeaderClickable(r));
                 Cursor = hand ? Cursors.Hand : Cursors.Default;
                 Invalidate();
@@ -422,6 +430,10 @@ namespace MiniAudio
                     if (AutoToggled != null) AutoToggled();
                     Invalidate();
                     break;
+                case Part.SoftToggle:
+                    if (SoftwareVolumeToggled != null) SoftwareVolumeToggled();
+                    Invalidate();
+                    break;
                 case Part.Gear:
                     HideFlyout();
                     if (SettingsRequested != null) SettingsRequested();
@@ -443,7 +455,7 @@ namespace MiniAudio
             base.OnMouseDoubleClick(e);
             Part part;
             var r = HitRow(e.Location, out part);
-            if (part == Part.Balance) { r.Balance = 0f; appAudio.SetBalance(r.App, 0f); Invalidate(); } // double-click centers
+            if (part == Part.Balance) { r.Balance = 0f; appAudio.SetBalance(r.App, 0f, true); Invalidate(); } // double-click centers
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -456,7 +468,7 @@ namespace MiniAudio
             if (part == Part.Balance)
             {
                 r.Balance = Snap(Math.Max(-1f, Math.Min(1f, r.Balance + 0.05f * notches)));
-                appAudio.SetBalance(r.App, r.Balance);
+                appAudio.SetBalance(r.App, r.Balance, true);
                 Invalidate();
                 return;
             }
@@ -502,8 +514,7 @@ namespace MiniAudio
         {
             float v = (x - r.BalanceSlider.Left) / (float)r.BalanceSlider.Width * 2f - 1f;
             r.Balance = Snap(Math.Max(-1f, Math.Min(1f, v)));
-            if (save) appAudio.SetBalance(r.App, r.Balance);
-            else r.App.SetBalance(r.Balance);
+            appAudio.SetBalance(r.App, r.Balance, save);
             Invalidate();
         }
 
@@ -653,7 +664,7 @@ namespace MiniAudio
             }
             DrawText(g, r.Dev.Name, r.IsDefault ? fontNameBold : fontName, theme.Text,
                 new Rectangle(tx, r.Bounds.Y + S(5), right - tx - badgeW, S(20)), TextFormatFlags.VerticalCenter);
-            bool soft = string.Equals(appAudio.SoftwareDeviceId, r.Dev.Id, StringComparison.OrdinalIgnoreCase);
+            bool soft = string.Equals(SoftwareId, r.Dev.Id, StringComparison.OrdinalIgnoreCase);
             DrawText(g, soft ? r.Dev.Detail + " · Software volume" : r.Dev.Detail, fontSmall, soft ? theme.Accent : theme.SubText,
                 new Rectangle(tx, r.Bounds.Y + S(23), right - tx, S(17)), TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
@@ -782,22 +793,24 @@ namespace MiniAudio
             using (var pen = new Pen(theme.Border))
                 g.DrawLine(pen, 1, footer.Y, footer.Width - 2, footer.Y);
 
-            // toggle switch
-            bool on = config.Auto;
-            var sw = new RectangleF(autoToggle.X, autoToggle.Y + S(2f), S(40f), S(20f));
+            DrawToggle(g, autoToggle, "Auto switch", config.Auto, hoverPart == Part.AutoToggle);
+            DrawToggle(g, softToggle, "Software volume", SoftwareId != null, hoverPart == Part.SoftToggle);
+
+            if (hoverPart == Part.Gear) Theme.FillRound(g, theme.SurfaceStrong, gear, S(4f));
+            DrawText(g, Glyphs.Settings, fontGlyph, theme.Text, gear, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+
+        void DrawToggle(Graphics g, Rectangle r, string label, bool on, bool hover)
+        {
+            var sw = new RectangleF(r.X, r.Y + S(2f), S(40f), S(20f));
             if (on) Theme.FillRound(g, theme.Accent, sw, sw.Height / 2);
             else
                 using (var path = Theme.RoundRect(sw, sw.Height / 2))
                 using (var pen = new Pen(theme.SubText, S(1f)))
                     g.DrawPath(pen, path);
-            float knobR = hoverPart == Part.AutoToggle ? S(7f) : S(6f);
             float kx = on ? sw.Right - S(10f) : sw.X + S(10f);
-            Theme.FillCircle(g, on ? theme.OnAccent : theme.SubText, kx, sw.Y + sw.Height / 2, knobR);
-            DrawText(g, "Auto switch", fontName, theme.Text,
-                new Rectangle(autoToggle.X + S(48), autoToggle.Y, autoToggle.Width - S(48), autoToggle.Height), TextFormatFlags.VerticalCenter);
-
-            if (hoverPart == Part.Gear) Theme.FillRound(g, theme.SurfaceStrong, gear, S(4f));
-            DrawText(g, Glyphs.Settings, fontGlyph, theme.Text, gear, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            Theme.FillCircle(g, on ? theme.OnAccent : theme.SubText, kx, sw.Y + sw.Height / 2, hover ? S(7f) : S(6f));
+            DrawText(g, label, fontName, theme.Text, new Rectangle(r.X + S(48), r.Y, r.Width - S(48), r.Height), TextFormatFlags.VerticalCenter);
         }
 
         static void DrawText(Graphics g, string text, Font font, Color color, Rectangle r, TextFormatFlags flags)

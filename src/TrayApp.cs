@@ -60,11 +60,12 @@ namespace MiniAudio
             audio.DevicesChanged += ScheduleEvaluate;
 
             osd = new Osd();
-            appAudio = new AppAudioService(audio, config);
+            appAudio = new AppAudioService(audio, config, true);
             flyout = new Flyout(audio, appAudio, config);
             flyout.SwitchRequested += delegate(AudioDevice d) { if (SwitchTo(d, null)) flyout.RefreshDevices(); };
             flyout.SettingsRequested += OpenSettings;
             flyout.AutoToggled += delegate { config.Auto = !config.Auto; config.Save(); };
+            flyout.SoftwareVolumeToggled += delegate { ToggleSoftwareVolume(false); }; // the flyout shows the state itself
 
             menu = new ContextMenuStrip();
             menu.Opening += delegate { BuildMenu(); };
@@ -117,20 +118,30 @@ namespace MiniAudio
 
         string softName, softGlyph; // for the notice when software volume ends on its own
 
-        void ToggleSoftwareVolume(AudioDevice d)
+        // Turns software volume on for the default output, or off again (wherever it is on)
+        void ToggleSoftwareVolume(bool notice)
         {
-            bool on = !string.Equals(appAudio.SoftwareDeviceId, d.Id, StringComparison.OrdinalIgnoreCase);
-            appAudio.SetSoftwareVolume(on ? d : null);
-            if (on) { softName = d.Name; softGlyph = Glyphs.ForDevice(d); softTimer.Start(); }
-            else softTimer.Stop();
-            if (config.ShowOsd) osd.ShowMessage(Glyphs.ForDevice(d), d.Name, on ? "Software volume on" : "Software volume off");
-            flyout.RefreshDevices();
+            bool on = appAudio.SoftwareDeviceId == null;
+            if (on)
+            {
+                var d = audio.GetDefault(EDataFlow.Render);
+                if (d == null) return;
+                appAudio.SetSoftwareVolume(d);
+                softName = d.Name;
+                softGlyph = Glyphs.ForDevice(d);
+                softTimer.Start();
+            }
+            else StopSoftwareVolume();
+            if (notice && config.ShowOsd) osd.ShowMessage(softGlyph, softName, on ? "Software volume on" : "Software volume off");
+            UpdateTray();
+            flyout.Invalidate();
         }
 
         void SoftwareVolumeEnded(string reason)
         {
             softTimer.Stop();
             if (config.ShowOsd && softName != null) osd.ShowMessage(softGlyph, softName, reason);
+            UpdateTray();
             flyout.RefreshDevices();
         }
 
@@ -256,41 +267,31 @@ namespace MiniAudio
             float vol = d != null ? d.GetVolume() : -1f;
             bool muted = d != null && d.GetMute();
             bool light = Theme.TaskbarLight();
+            string softId = appAudio.SoftwareDeviceId;
+            bool soft = softId != null;
             string glyph = muted ? Glyphs.Mute : Glyphs.ForDevice(d);
 
-            string key = glyph + (light ? "L" : "D");
+            // the accent color is part of the key: it can change while MiniAudio runs
+            string key = glyph + (light ? "L" : "D") + (soft ? Theme.AccentOn(light).ToArgb().ToString("X8") : "");
             if (key != trayKey)
             {
                 trayKey = key;
-                tray.Icon = GetIcon(glyph, light);
+                tray.Icon = GetIcon(key, glyph, light, soft);
             }
 
-            string text = d == null ? "MiniAudio — no output device"
-                : d.Name + (muted ? " — muted" : vol >= 0 ? " — " + (int)Math.Round(vol * 100) + "%" : "");
-            if (text.Length > 63) text = text.Substring(0, 62) + "…";
+            bool softElsewhere = soft && (d == null || !string.Equals(d.Id, softId, StringComparison.OrdinalIgnoreCase));
+            string text = TrayLook.Text(d != null ? d.Name : null, vol, muted, soft, softElsewhere ? softName : null);
             if (text != trayText) { trayText = text; tray.Text = text; }
         }
 
-        Icon GetIcon(string glyph, bool light)
+        Icon GetIcon(string key, string glyph, bool light, bool soft)
         {
-            string key = glyph + (light ? "L" : "D");
             Icon cached;
             if (iconCache.TryGetValue(key, out cached)) return cached;
 
-            int s = SystemInformation.SmallIconSize.Width;
             Icon result;
-            using (var bmp = new Bitmap(s, s))
+            using (var bmp = TrayLook.Icon(glyph, light, soft, SystemInformation.SmallIconSize.Width))
             {
-                using (var g = Graphics.FromImage(bmp))
-                using (var f = Glyphs.Font(s * 0.82f))
-                using (var b = new SolidBrush(light ? Color.FromArgb(0x1A, 0x1A, 0x1A) : Color.White))
-                using (var sf = new StringFormat())
-                {
-                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-                    sf.Alignment = StringAlignment.Center;
-                    sf.LineAlignment = StringAlignment.Center;
-                    g.DrawString(glyph, f, b, new RectangleF(0, 0, s, s), sf);
-                }
                 IntPtr h = bmp.GetHicon();
                 try { using (var tmp = Icon.FromHandle(h)) result = (Icon)tmp.Clone(); }
                 finally { Win32.DestroyIcon(h); }
@@ -317,12 +318,11 @@ namespace MiniAudio
                 it.Click += delegate { SwitchTo(dev, null); };
                 menu.Items.Add(it);
             }
-            var curDev = outs.Find(delegate(AudioDevice d) { return string.Equals(d.Id, cur, StringComparison.OrdinalIgnoreCase); });
             var soft = new ToolStripMenuItem("Software volume");
             soft.ToolTipText = "Also lowers the sound on this PC, for a device that ignores volume changes. Ends when MiniAudio closes.";
-            soft.Enabled = curDev != null;
-            soft.Checked = curDev != null && string.Equals(appAudio.SoftwareDeviceId, curDev.Id, StringComparison.OrdinalIgnoreCase);
-            soft.Click += delegate { ToggleSoftwareVolume(curDev); };
+            soft.Checked = appAudio.SoftwareDeviceId != null;
+            soft.Enabled = soft.Checked || cur != null;
+            soft.Click += delegate { ToggleSoftwareVolume(true); };
             menu.Items.Add(soft);
 
             menu.Items.Add(new ToolStripSeparator());
@@ -407,6 +407,38 @@ namespace MiniAudio
             foreach (var ic in iconCache.Values) ic.Dispose();
             invoker.Dispose();
             ExitThread();
+        }
+    }
+
+    // What the tray icon tells without a click: the default device, its volume, and whether software volume is on
+    static class TrayLook
+    {
+        // Device glyph in the taskbar's text color, or in the accent color while software volume is on
+        public static Bitmap Icon(string glyph, bool lightTaskbar, bool softwareVolume, int size)
+        {
+            Color color = softwareVolume ? Theme.AccentOn(lightTaskbar)
+                : lightTaskbar ? Color.FromArgb(0x1A, 0x1A, 0x1A) : Color.White;
+            var bmp = new Bitmap(size, size);
+            using (var g = Graphics.FromImage(bmp))
+            using (var f = Glyphs.Font(size * 0.82f))
+            using (var b = new SolidBrush(color))
+            using (var sf = new StringFormat())
+            {
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                sf.Alignment = StringAlignment.Center;
+                sf.LineAlignment = StringAlignment.Center;
+                g.DrawString(glyph, f, b, new RectangleF(0, 0, size, size), sf);
+            }
+            return bmp;
+        }
+
+        // softwareOther: the device software volume is on for, when that is not the default device
+        public static string Text(string device, float volume, bool muted, bool softwareVolume, string softwareOther)
+        {
+            if (device == null) return "MiniAudio — no output device";
+            string text = device + (muted ? " — muted" : volume >= 0 ? " — " + (int)Math.Round(volume * 100) + "%" : "");
+            if (softwareVolume) text += " · Software volume" + (softwareOther != null ? ": " + softwareOther : "");
+            return text.Length > 63 ? text.Substring(0, 62) + "…" : text; // the text of a tray icon is limited to 63 characters
         }
     }
 
