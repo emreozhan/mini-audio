@@ -12,6 +12,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Text;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace MiniAudio
 {
@@ -39,7 +40,7 @@ namespace MiniAudio
         readonly Flyout flyout;
         readonly Osd osd;
         readonly HotkeyWindow hotkeyWin;
-        readonly Timer debounce, poll;
+        readonly Timer debounce, poll, softTimer;
         readonly Dictionary<string, Icon> iconCache = new Dictionary<string, Icon>();
         SettingsForm settingsForm;
         string registeredHotkey;
@@ -85,6 +86,11 @@ namespace MiniAudio
             poll.Tick += delegate { OnPoll(); };
             poll.Start();
 
+            softTimer = new Timer(); // software volume follows the volume keys and catches new sessions
+            softTimer.Interval = 100;
+            softTimer.Tick += delegate { if (!appAudio.ApplySoftwareVolume()) SoftwareVolumeEnded("Software volume off · device disconnected"); };
+            SystemEvents.SessionEnding += OnSessionEnding;
+
             bool firstRun = config.IsNew;
             Evaluate();
             tray.Visible = true;
@@ -102,9 +108,43 @@ namespace MiniAudio
         void OnPoll()
         {
             UpdateTray();
-            // Re-apply saved balances to new sessions (Windows is not relied on to keep channel volumes)
-            // to apps that start playing (the flyout does this itself while open)
-            if (++pollCount % 3 == 0 && config.Balances.Count > 0 && !flyout.Visible) appAudio.GetApps();
+            // Prepare the channels of apps that start playing: saved balance, or the full level back after an
+            // earlier software volume (the flyout does this itself while open)
+            if (++pollCount % 3 == 0 && !flyout.Visible) appAudio.GetApps();
+        }
+
+        // ---- software volume ----
+
+        string softName, softGlyph; // for the notice when software volume ends on its own
+
+        void ToggleSoftwareVolume(AudioDevice d)
+        {
+            bool on = !string.Equals(appAudio.SoftwareDeviceId, d.Id, StringComparison.OrdinalIgnoreCase);
+            appAudio.SetSoftwareVolume(on ? d : null);
+            if (on) { softName = d.Name; softGlyph = Glyphs.ForDevice(d); softTimer.Start(); }
+            else softTimer.Stop();
+            if (config.ShowOsd) osd.ShowMessage(Glyphs.ForDevice(d), d.Name, on ? "Software volume on" : "Software volume off");
+            flyout.RefreshDevices();
+        }
+
+        void SoftwareVolumeEnded(string reason)
+        {
+            softTimer.Stop();
+            if (config.ShowOsd && softName != null) osd.ShowMessage(softGlyph, softName, reason);
+            flyout.RefreshDevices();
+        }
+
+        // Windows is shutting down or signing out: give apps their full level back before MiniAudio is closed
+        void OnSessionEnding(object sender, SessionEndingEventArgs e)
+        {
+            if (invoker.InvokeRequired) { invoker.Invoke((Action)StopSoftwareVolume); return; }
+            StopSoftwareVolume();
+        }
+
+        void StopSoftwareVolume()
+        {
+            softTimer.Stop();
+            appAudio.SetSoftwareVolume(null);
         }
 
         // ---- auto switching ----
@@ -277,6 +317,13 @@ namespace MiniAudio
                 it.Click += delegate { SwitchTo(dev, null); };
                 menu.Items.Add(it);
             }
+            var curDev = outs.Find(delegate(AudioDevice d) { return string.Equals(d.Id, cur, StringComparison.OrdinalIgnoreCase); });
+            var soft = new ToolStripMenuItem("Software volume");
+            soft.ToolTipText = "Also lowers the sound on this PC, for a device that ignores volume changes. Ends when MiniAudio closes.";
+            soft.Enabled = curDev != null;
+            soft.Checked = curDev != null && string.Equals(appAudio.SoftwareDeviceId, curDev.Id, StringComparison.OrdinalIgnoreCase);
+            soft.Click += delegate { ToggleSoftwareVolume(curDev); };
+            menu.Items.Add(soft);
 
             menu.Items.Add(new ToolStripSeparator());
             var auto = new ToolStripMenuItem("Auto switch");
@@ -346,6 +393,8 @@ namespace MiniAudio
 
         void ExitApp()
         {
+            StopSoftwareVolume(); // apps get their full level back
+            SystemEvents.SessionEnding -= OnSessionEnding;
             poll.Stop();
             debounce.Stop();
             Win32.UnregisterHotKey(hotkeyWin.Handle, HotkeyId);

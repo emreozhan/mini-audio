@@ -84,6 +84,16 @@ namespace MiniAudio
             return -1f;
         }
 
+        // Level in dB as the device applies it; NaN if unreadable
+        public float GetVolumeDb()
+        {
+            var v = Volume;
+            float db;
+            try { if (v != null && v.GetMasterVolumeLevel(out db) == 0) return db; }
+            catch { }
+            return float.NaN;
+        }
+
         public void SetVolume(float level)
         {
             var v = Volume;
