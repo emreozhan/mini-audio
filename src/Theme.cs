@@ -18,8 +18,7 @@ namespace MiniAudio
         {
             var t = new Theme();
             t.Dark = ForceDark ?? ReadDword(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) == 0;
-            Color accentLight = Color.FromArgb(0x4C, 0xC2, 0xFF), accentDark = Color.FromArgb(0x00, 0x5F, 0xB8);
-            ReadAccentPalette(ref accentLight, ref accentDark);
+            t.Accent = AccentOn(!t.Dark);
             if (t.Dark)
             {
                 t.Bg = Color.FromArgb(0x2B, 0x2B, 0x2B);
@@ -28,7 +27,6 @@ namespace MiniAudio
                 t.Border = Color.FromArgb(0x45, 0x45, 0x45);
                 t.Text = Color.FromArgb(0xF5, 0xF5, 0xF5);
                 t.SubText = Color.FromArgb(0xA8, 0xA8, 0xA8);
-                t.Accent = accentLight;
                 t.OnAccent = Color.FromArgb(0x10, 0x10, 0x10);
                 t.Track = Color.FromArgb(0x5A, 0x5A, 0x5A);
                 t.Danger = Color.FromArgb(0xFF, 0x99, 0xA4);
@@ -41,12 +39,19 @@ namespace MiniAudio
                 t.Border = Color.FromArgb(0xDD, 0xDD, 0xDD);
                 t.Text = Color.FromArgb(0x1A, 0x1A, 0x1A);
                 t.SubText = Color.FromArgb(0x5F, 0x5F, 0x5F);
-                t.Accent = accentDark;
                 t.OnAccent = Color.White;
                 t.Track = Color.FromArgb(0xB8, 0xB8, 0xB8);
                 t.Danger = Color.FromArgb(0xC4, 0x2B, 0x1C);
             }
             return t;
+        }
+
+        // Windows accent shade that reads on a light or a dark background
+        public static Color AccentOn(bool lightBackground)
+        {
+            Color accentLight = Color.FromArgb(0x4C, 0xC2, 0xFF), accentDark = Color.FromArgb(0x00, 0x5F, 0xB8);
+            ReadAccentPalette(ref accentLight, ref accentDark);
+            return lightBackground ? accentDark : accentLight;
         }
 
         public static bool TaskbarLight()

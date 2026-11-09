@@ -97,7 +97,7 @@ namespace MiniAudio
 
             if (cmd == "--apps")
             {
-                var apps = new AppAudioService(audio, config);
+                var apps = new AppAudioService(audio, config, false);
                 if (!AppRouting.Available) Console.WriteLine("(per-app output routing is not available on this Windows version)");
                 foreach (var a in apps.GetApps())
                 {
@@ -114,7 +114,7 @@ namespace MiniAudio
             if (cmd == "--route" && args.Length > 2)
             {
                 // --route <app> <device name|id|default>
-                var apps = new AppAudioService(audio, config);
+                var apps = new AppAudioService(audio, config, false);
                 AppSession app = null;
                 foreach (var a in apps.GetApps())
                     if (app == null && !a.IsSystem && (a.Key.IndexOf(args[1], StringComparison.OrdinalIgnoreCase) >= 0
@@ -140,7 +140,7 @@ namespace MiniAudio
             if (cmd == "--balance" && args.Length > 2)
             {
                 // --balance <app> <-100..100>  (negative = left, positive = right, 0 = center)
-                var apps = new AppAudioService(audio, config);
+                var apps = new AppAudioService(audio, config, false);
                 AppSession app = null;
                 foreach (var a in apps.GetApps())
                     if (app == null && (a.Key.IndexOf(args[1], StringComparison.OrdinalIgnoreCase) >= 0
@@ -149,7 +149,7 @@ namespace MiniAudio
                 int pct;
                 if (app == null || !int.TryParse(args[2], out pct)) { Console.WriteLine("Usage: --balance <app> <-100..100>"); return 1; }
                 if (!app.HasBalance) { Console.WriteLine(app.Name + " has no stereo channels to balance."); return 1; }
-                apps.SetBalance(app, Math.Max(-100, Math.Min(100, pct)) / 100f);
+                apps.SetBalance(app, Math.Max(-100, Math.Min(100, pct)) / 100f, true);
                 Console.WriteLine("Balance: " + app.Name + " = " + app.GetBalance().ToString("0.00"));
                 return 0;
             }
@@ -165,9 +165,18 @@ namespace MiniAudio
                     Theme.ForceDark = dark;
                     string sfx = dark ? "-dark.png" : "-light.png";
                     foreach (FlyoutTab t in new[] { FlyoutTab.Devices, FlyoutTab.Apps })
-                        using (var f = new Flyout(audio, new AppAudioService(audio, config), config))
+                        using (var f = new Flyout(audio, new AppAudioService(audio, config, false), config))
                         using (var b = f.Snapshot(t)) b.Save(System.IO.Path.Combine(dir, "flyout-" + t.ToString().ToLowerInvariant() + sfx));
                     var dev = audio.GetDefault(EDataFlow.Render);
+                    // software volume shown as on (display only; no level changes)
+                    Flyout.SnapshotSoftwareId = dev != null ? dev.Id : null;
+                    using (var f = new Flyout(audio, new AppAudioService(audio, config, false), config))
+                    using (var b = f.Snapshot(FlyoutTab.Devices)) b.Save(System.IO.Path.Combine(dir, "flyout-devices-soft" + sfx));
+                    Flyout.SnapshotSoftwareId = null;
+                    // tray icon on a taskbar of the same theme, normal and with software volume on
+                    foreach (bool soft in new[] { false, true })
+                        using (var b = TrayLook.Icon(Glyphs.ForDevice(dev), !dark, soft, 64))
+                            b.Save(System.IO.Path.Combine(dir, "tray" + (soft ? "-soft" : "") + sfx));
                     using (var o = new Osd())
                     using (var b = o.Snapshot(Glyphs.ForDevice(dev), dev != null ? dev.Name : "?", "Connected · now the default output"))
                         b.Save(System.IO.Path.Combine(dir, "osd" + sfx));

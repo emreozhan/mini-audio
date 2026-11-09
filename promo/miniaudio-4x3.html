@@ -5,7 +5,7 @@
 <title>MiniAudio promo 4:3</title>
 <!--
   Source of miniaudio-4x3.png (1600x1200).
-  Flyout images come from:  MiniAudio.exe --snapshot promo\snapshots
+  Flyout and tray icon images come from:  MiniAudio.exe --snapshot promo\snapshots
   Render (from the repository root, absolute paths):
     "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --headless --disable-gpu --hide-scrollbars
       --window-size=1600,1200 --screenshot=<abs>\promo\miniaudio-4x3.png file:///<abs>/promo/miniaudio-4x3.html
@@ -190,18 +190,27 @@
     color: #0b1620;
     font-size: 12.5px; font-weight: 700; letter-spacing: 1.2px;
   }
-  .path {
-    position: absolute; left: 24px; right: 24px; bottom: 22px;
-    display: flex; align-items: center; gap: 8px;
-    height: 36px; padding: 0 12px;
+  /* software volume: the real toggle (on) and the tray icon before/after */
+  .softdemo {
+    position: absolute; left: 20px; right: 20px; bottom: 20px;
+    display: grid; gap: 8px;
+    padding: 10px 12px;
     border-radius: 8px;
     background: rgba(0, 0, 0, 0.28);
     border: 1px solid rgba(76, 194, 255, 0.22);
-    font-size: 14.5px; color: #d6eefc;
-    white-space: nowrap;
+    font-size: 13.5px; color: #d6eefc;
   }
-  .path .ico { font-size: 11px; color: var(--accent); }
-  .path .ico.big { font-size: 15px; }
+  .softdemo .row { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+  .softdemo .toggle {
+    width: 154px; height: 30px; flex: none;
+    border-radius: 6px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10);
+    /* the Software volume toggle in the footer of flyout-devices-soft-dark.png (380x312) */
+    background: url("snapshots/flyout-devices-soft-dark.png") -148px -273px no-repeat;
+  }
+  .softdemo .tray { display: flex; align-items: center; gap: 7px; flex: none; }
+  .softdemo .tray img { width: 22px; height: 22px; display: block; }
+  .softdemo .tray .ico { font-size: 11px; color: var(--accent); }
   .flags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
   .flag {
     font-family: var(--mono);
@@ -256,8 +265,11 @@
     <div class="card new">
       <span class="pill-new">NEW</span>
       <div class="head"><div class="badge-ico"><i class="ico">&#xE995;</i></div><h4>Software volume</h4></div>
-      <p>Makes the <b>volume keys work again</b> on a headset dongle that ignores volume changes. Nothing is saved; it ends when MiniAudio closes.</p>
-      <div class="path"><i class="ico big">&#xE7F6;</i>Tray menu<i class="ico">&#xE76C;</i>Software volume</div>
+      <p>Makes the <b>volume keys work again</b> on a headset dongle that ignores them.</p>
+      <div class="softdemo">
+        <div class="row"><span class="toggle"></span>flyout or tray menu</div>
+        <div class="row"><span class="tray"><img src="snapshots/tray-dark.png" alt=""><i class="ico">&#xE76C;</i><img src="snapshots/tray-soft-dark.png" alt=""></span>the tray icon shows it is on</div>
+      </div>
     </div>
     <div class="card">
       <div class="head"><div class="badge-ico"><i class="ico">&#xE756;</i></div><h4>Command line</h4></div>
@@ -285,7 +297,7 @@
     { on: "devices", side: "left",  box: [6, 220, 374, 290],
       title: "Volume, mute and live level", text: "For each device. The mouse wheel works too." },
     { on: "devices", side: "left",  box: [4, 412, 376, 452],
-      title: "Auto switch on or off", text: "The gear opens the settings." },
+      title: "Toggles on every tab", text: "Auto switch, Software volume and the settings gear." },
     { on: "apps", side: "right", box: [58, 71, 272, 90],
       title: "Pick an output per app", text: "A game on the headset, the browser on the speaker." },
     { on: "apps", side: "right", box: [20, 191, 376, 213],
