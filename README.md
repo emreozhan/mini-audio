@@ -22,6 +22,8 @@ Small Windows tray app for switching between audio outputs (USB dongle headset, 
 - Middle-click the tray icon to mute/unmute the default output.
 - Follows the Windows light/dark theme and accent color.
 
+![Reset device: the ↺ button in the flyout reconnects a USB headset as if it was replugged, in three steps](promo/miniaudio-reset-4x3.png)
+
 ## Requirements
 
 - Windows 10 or 11 (tested on Windows 11; rounded corners only on Windows 11)
@@ -55,6 +57,8 @@ MiniAudioTests.exe
 MiniAudio.exe --snapshot promo\snapshots
 "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --headless --disable-gpu --hide-scrollbars --window-size=1600,1200 --screenshot="%CD%\promo\miniaudio-4x3.png" "file:///%CD%/promo/miniaudio-4x3.html"
 ```
+
+The *Reset device* image is made the same way from `promo/miniaudio-reset-4x3.html` and the pictures in `promo/snapshots-reset`; the brief it was built from is `promo/miniaudio-reset-4x3.prompt.md`.
 
 ## Command line
 

@@ -1,0 +1,181 @@
+<!doctype html>
+<!--
+  Source of miniaudio-reset-4x3.png (1600x1200).
+  Real UI snapshots, from the repository root in PowerShell:
+    .\MiniAudio.exe --snapshot promo\snapshots-reset
+  Render in PowerShell, with absolute paths (<abs> = the repository folder):
+    & "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --headless --disable-gpu --hide-scrollbars --window-size=1600,1200 --screenshot="<abs>\promo\miniaudio-reset-4x3.png" "file:///<abs>/promo/miniaudio-reset-4x3.html"
+  The committed PNG was rendered in a restricted runner that could not start Edge's sandboxed
+  processes, so it added: --no-sandbox --user-data-dir="$env:TEMP\miniaudio-reset-render-profile"
+  The plain command above gives the same picture.
+  Copy source: README.md, especially Reset device and Reset device, in detail.
+  Fresh Devices snapshot: 380x312, displayed at 1.5x (570x468).
+  Verified Reset button bounds in snapshot pixels: x=304..332, y=272..304.
+  The highlight adds 2 display pixels around those bounds; it does not alter the image.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1600, initial-scale=1">
+<title>MiniAudio — Reset device</title>
+<style>
+  :root {
+    --bg: #161616;
+    --text: #f5f5f5;
+    --sub: #b9b9b9;
+    --accent: #4cc2ff;
+    --card: rgba(255, 255, 255, .045);
+    --card-border: rgba(255, 255, 255, .085);
+    --display: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+    --body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    --icons: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1600px; height: 1200px; background: var(--bg); }
+  body { color: var(--text); font-family: var(--body); }
+  .canvas {
+    position: relative;
+    width: 1600px; height: 1200px; overflow: hidden;
+    background:
+      radial-gradient(ellipse 650px 440px at 1190px 455px, rgba(0, 103, 192, .27), transparent 72%),
+      radial-gradient(ellipse 500px 350px at 1360px 590px, rgba(76, 194, 255, .10), transparent 72%),
+      linear-gradient(180deg, #1c1c1c 0%, #161616 60%, #121212 100%);
+  }
+  .canvas::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .045;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  .ico { font-family: var(--icons); font-style: normal; font-weight: 400; line-height: 1; }
+  .brand { position: absolute; left: 80px; top: 64px; display: flex; gap: 18px; align-items: center; }
+  .tile {
+    width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center;
+    background: linear-gradient(140deg, #6fd0ff 0%, #2ea6f0 45%, #0067c0 100%);
+    box-shadow: 0 10px 26px rgba(0, 103, 192, .38), inset 0 1px 0 rgba(255, 255, 255, .35);
+  }
+  .tile .ico { font-size: 32px; color: #fff; }
+  .wordmark { font-family: var(--display); font-size: 38px; font-weight: 600; letter-spacing: -.9px; }
+  .hero-copy { position: absolute; left: 80px; top: 184px; width: 730px; }
+  .headline { display: flex; align-items: center; gap: 24px; }
+  h1 { margin: 0; font-family: var(--display); font-size: 86px; line-height: 1.08; font-weight: 600; letter-spacing: -2.8px; }
+  .new {
+    margin-top: 12px; padding: 7px 13px 8px; border-radius: 16px;
+    background: var(--accent); color: #0b1620; font-size: 14px; font-weight: 700; letter-spacing: 1.2px;
+  }
+  .tagline { margin: 24px 0 0; font-family: var(--display); font-size: 37px; line-height: 1.29; font-weight: 400; letter-spacing: -.45px; }
+  .tagline span { color: var(--accent); }
+  .support { margin: 28px 0 0; width: 680px; font-size: 22px; line-height: 1.5; color: var(--sub); }
+  .support strong { color: #e7e7e7; font-weight: 600; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 10px; margin-top: 26px;
+    padding: 9px 16px 10px; border-radius: 22px; border: 1px solid rgba(76, 194, 255, .24);
+    background: rgba(76, 194, 255, .07); color: #d6eefc; font-size: 17px; font-weight: 600;
+  }
+  .chip .ico { color: var(--accent); font-size: 17px; }
+  .flyout {
+    position: absolute; left: 910px; top: 166px; width: 570px; height: 468px;
+    border-radius: 10px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .10), 0 28px 70px rgba(0, 0, 0, .55), 0 8px 20px rgba(0, 0, 0, .35);
+  }
+  .flyout img { display: block; width: 570px; height: 468px; border-radius: 10px; }
+  .reset-highlight {
+    position: absolute; left: 454px; top: 406px; width: 46px; height: 52px;
+    border: 2px solid var(--accent); border-radius: 9px;
+    box-shadow: 0 0 0 4px rgba(76, 194, 255, .15), 0 0 25px rgba(76, 194, 255, .40);
+  }
+  .wire { position: absolute; left: 0; top: 0; pointer-events: none; }
+  .callout { position: absolute; left: 930px; top: 653px; width: 330px; text-align: right; }
+  .callout h2 { margin: 0; font-family: var(--display); font-size: 24px; line-height: 1.25; font-weight: 600; }
+  .callout p { margin: 6px 0 0; color: var(--sub); font-size: 17px; line-height: 1.35; }
+  .steps { position: absolute; left: 80px; right: 80px; top: 722px; }
+  .section-label { margin: 0; color: #a8a8a8; font-size: 16px; line-height: 22px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase; }
+  .step-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 16px 0 0; padding: 0; list-style: none; }
+  .step {
+    height: 174px; padding: 23px 25px; border-radius: 14px;
+    background: var(--card); border: 1px solid var(--card-border);
+  }
+  .step:first-child { border-color: rgba(76, 194, 255, .38); background: linear-gradient(145deg, rgba(76, 194, 255, .11), rgba(255, 255, 255, .035)); }
+  .step-head { display: flex; align-items: center; gap: 15px; }
+  .number { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 10px; background: rgba(76, 194, 255, .13); color: var(--accent); font-size: 20px; font-weight: 600; }
+  .step:first-child .number { background: var(--accent); color: #0b1620; }
+  .step h3 { margin: 0; font-family: var(--display); font-size: 23px; line-height: 1.25; font-weight: 600; letter-spacing: -.25px; }
+  .step h3 .ico { margin-left: 5px; font-size: 24px; vertical-align: -2px; color: var(--accent); }
+  .step p { margin: 16px 0 0; font-size: 19px; line-height: 1.4; color: var(--sub); }
+  .step p strong { color: #e7e7e7; font-weight: 600; }
+  .facts {
+    position: absolute; left: 80px; right: 80px; top: 966px; height: 102px;
+    display: grid; grid-template-columns: 176px 457px 1fr; align-items: center; gap: 26px;
+    padding: 16px 24px; border-radius: 14px; background: var(--card); border: 1px solid var(--card-border);
+  }
+  .facts h2 { margin: 0; font-family: var(--display); font-size: 20px; font-weight: 600; }
+  .fact { padding-left: 26px; border-left: 1px solid rgba(255, 255, 255, .10); }
+  .fact h3 { margin: 0 0 4px; font-size: 17px; line-height: 1.3; font-weight: 600; color: #dedede; }
+  .fact p { margin: 0; font-size: 16px; line-height: 1.45; color: var(--sub); }
+  .also { position: absolute; left: 80px; right: 80px; top: 1094px; }
+  .also h2 { font-size: 14px; line-height: 20px; letter-spacing: 1.4px; }
+  .also ul { display: flex; justify-content: space-between; align-items: center; margin: 11px 0 0; padding: 0; list-style: none; }
+  .also li { color: #b9b9b9; font-size: 17px; line-height: 22px; white-space: nowrap; }
+  .also li + li { border-left: 1px solid rgba(255, 255, 255, .16); padding-left: 25px; }
+</style>
+</head>
+<body>
+<main class="canvas">
+  <header class="brand" aria-label="MiniAudio">
+    <div class="tile" aria-hidden="true"><i class="ico">&#xE995;</i></div>
+    <div class="wordmark">MiniAudio</div>
+  </header>
+
+  <section class="hero-copy" aria-labelledby="title">
+    <div class="headline"><h1 id="title">Reset device</h1><span class="new">NEW</span></div>
+    <p class="tagline">Replug your USB headset<br><span>without touching the plug.</span></p>
+    <p class="support">Some wireless headset dongles stop applying volume changes until they’re unplugged and plugged back in. <strong>Reset device reconnects the dongle by software.</strong></p>
+    <div class="chip"><i class="ico" aria-hidden="true">&#xE73E;</i>USB outputs only</div>
+  </section>
+
+  <div class="flyout">
+    <img src="snapshots-reset/flyout-devices-dark.png" width="570" height="468" alt="The real MiniAudio Devices tab, showing the Arctis Nova 7 Gen 2 output and microphone. Reset device is the circular arrow just left of the settings gear.">
+    <div class="reset-highlight" aria-hidden="true"></div>
+  </div>
+  <svg class="wire" width="1600" height="1200" viewBox="0 0 1600 1200" fill="none" aria-hidden="true">
+    <path d="M1387 629 V659 Q1387 668 1378 668 H1276" stroke="#4cc2ff" stroke-width="1.5" stroke-opacity=".85"/>
+    <circle cx="1276" cy="668" r="3.5" fill="#4cc2ff"/>
+  </svg>
+  <aside class="callout"><h2>Reset device</h2><p>Bottom of the flyout, beside Settings.</p></aside>
+
+  <section class="steps" aria-labelledby="how">
+    <h2 class="section-label" id="how">How it works</h2>
+    <ol class="step-grid">
+      <li class="step">
+        <div class="step-head"><span class="number">1</span><h3>Click <i class="ico" aria-label="Reset">&#xE777;</i></h3></div>
+        <p>At the bottom of the flyout, or<br>right-click the tray icon → <strong>Reset device.</strong></p>
+      </li>
+      <li class="step">
+        <div class="step-head"><span class="number">2</span><h3>Approve the Windows prompt</h3></div>
+        <p>Windows asks for administrator rights<br>to reconnect the USB device.</p>
+      </li>
+      <li class="step">
+        <div class="step-head"><span class="number">3</span><h3>Back in seconds</h3></div>
+        <p>Your headset reconnects and becomes<br>the <strong>default output</strong> again.</p>
+      </li>
+    </ol>
+  </section>
+
+  <aside class="facts" aria-labelledby="facts-title">
+    <h2 id="facts-title">Good to know</h2>
+    <div class="fact"><h3>USB port verified first</h3><p>MiniAudio checks the port holds your device<br>before disconnecting it.</p></div>
+    <div class="fact"><h3>The port usually keeps its power.</h3><p>If your device needs a real power cycle,<br>unplug it by hand.</p></div>
+  </aside>
+
+  <footer class="also">
+    <h2 class="section-label">Also in MiniAudio</h2>
+    <ul>
+      <li>Devices &amp; Apps tabs</li>
+      <li>Per-app output &amp; balance</li>
+      <li>Auto switching</li>
+      <li>Next-device hotkey</li>
+      <li>Software volume</li>
+      <li>Single EXE · no install</li>
+    </ul>
+  </footer>
+</main>
+</body>
+</html>
