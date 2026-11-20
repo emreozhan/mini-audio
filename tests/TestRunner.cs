@@ -22,6 +22,7 @@ namespace MiniAudio.Tests
             SoftwareVolumeTests.AddTo(tests);
             TrayLookTests.AddTo(tests);
             FlyoutFooterTests.AddTo(tests);
+            UsbResetTests.AddTo(tests);
 
             int passed = 0, failed = 0;
             foreach (var t in tests)

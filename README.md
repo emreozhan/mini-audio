@@ -18,6 +18,7 @@ Small Windows tray app for switching between audio outputs (USB dongle headset, 
 - **Next-device hotkey** (default `Ctrl+Alt+S`, can be changed or turned off): cycles through the checked outputs and shows a short on-screen notice.
 - The communications (call) device is switched together with the default device (can be turned off). Optionally the matching microphone is switched too.
 - **Software volume** (the toggle at the bottom of the flyout, or right-click the tray icon → *Software volume*): for an output whose own volume control stops working, e.g. a wireless headset dongle that accepts volume changes but ignores them. While it is on, the volume keys and Windows' volume slider also lower the sound on this PC, so they work again. The tray icon is drawn in the Windows accent color while it is on, so you can tell without opening anything. Applies to the current default output and ends when MiniAudio closes or the device disconnects; nothing is saved. See the notes below.
+- **Reset device** (the ↺ button at the bottom of the flyout, or right-click the tray icon → *Reset device*): reconnects the USB device of the default output as if it was unplugged and plugged back in, without touching the plug. Meant for a dongle that only behaves again after being replugged. Windows asks for administrator rights; the device is gone for a few seconds and is then the default output again. USB outputs only. See the notes below.
 - Middle-click the tray icon to mute/unmute the default output.
 - Follows the Windows light/dark theme and accent color.
 
@@ -39,7 +40,7 @@ Only one instance runs at a time; the app lives in the system tray.
 
 ### Tests
 
-The channel math behind balance and software volume has tests. Build and run them from the repository root:
+The channel math behind balance and software volume, the flyout's footer and the device lookup of *Reset device* have tests; they change no setting and reset nothing. Build and run them from the repository root:
 
 ```bat
 C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /codepage:65001 /target:exe /main:MiniAudio.Tests.TestRunner /out:MiniAudioTests.exe src\*.cs tests\*.cs
@@ -63,6 +64,7 @@ Works whether or not the tray app is running (handy for Stream Deck or hotkey to
 MiniAudio.exe --list
 MiniAudio.exe --switch Soundcore
 MiniAudio.exe --next
+MiniAudio.exe --reset Arctis
 MiniAudio.exe --apps
 MiniAudio.exe --route chrome Soundcore
 MiniAudio.exe --balance chrome -30
@@ -71,6 +73,7 @@ MiniAudio.exe --balance chrome -30
 - `--list` prints active outputs and inputs; `*` marks the default device, `c` the communications device.
 - `--switch <name|id>` makes the first active device whose name contains the text (or whose id matches) the default.
 - `--next` switches to the next checked output in priority order.
+- `--reset [name|id]` reconnects the USB device of an output as if it was unplugged and plugged back in; without a name, the default output. Windows asks for administrator rights unless the command prompt already has them.
 - `--apps` lists apps with audio open: volume, balance and output device (`>` = playing now).
 - `--route <app> <device|default>` sends an app to an output, e.g. `--route discord Arctis`, or back to the default device.
 - `--balance <app> <-100..100>` sets an app's balance (negative = left, 0 = center).
@@ -96,3 +99,9 @@ Settings are stored in `%APPDATA%\MiniAudio\config.txt`.
   - It ends when MiniAudio closes, when Windows shuts down or signs out, and when the device disconnects (unplugging usually fixes the dongle). Apps get their full level back, so if the device still ignores volume changes at that moment, the sound gets as loud as the device is set.
   - Windows remembers channel volumes per app. If MiniAudio is closed unexpectedly while software volume is on, apps left lowered get their full level back the next time MiniAudio sees them.
   - Apps that use exclusive mode bypass Windows' mixer and are not affected.
+- **Reset device, in detail.** MiniAudio asks the USB hub the device is plugged into to cycle its port: Windows sees the device leave and arrive again, as when the plug is pulled. The port usually keeps its power, so a device that needs a real power cycle still has to be unplugged by hand. If the hub cannot cycle the port, the device is restarted with `pnputil /restart-device` instead (Windows 10 version 2004 or later).
+  - Both need administrator rights, so Windows shows its permission prompt each time.
+  - Before a port is cycled, MiniAudio checks that the port really holds that device; otherwise nothing is disconnected.
+  - Everything on the same USB device reconnects with it, e.g. the headset's microphone and its buttons. Sound may briefly play on another output while the device is gone.
+  - If software volume was on for the device, it is turned on again as soon as the device is back, so the level does not jump. Turn it off yourself once the device applies volume changes again.
+  - Bluetooth, monitor and built-in outputs cannot be reset this way.
