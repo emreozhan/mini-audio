@@ -15,7 +15,7 @@ namespace MiniAudio
 
     class Flyout : Form
     {
-        enum Part { None, Header, Mute, Slider, Balance, AutoToggle, SoftToggle, Gear, TabDevices, TabApps }
+        enum Part { None, Header, Mute, Slider, Balance, AutoToggle, SoftToggle, Reset, Gear, TabDevices, TabApps }
 
         class Row
         {
@@ -49,7 +49,7 @@ namespace MiniAudio
         List<Row> rows = new List<Row>();
         List<Section> sections = new List<Section>();
         string emptyText;
-        Rectangle tabs, tabDevices, tabApps, viewport, footer, autoToggle, softToggle, gear;
+        Rectangle tabs, tabDevices, tabApps, viewport, footer, autoToggle, softToggle, reset, gear;
         int contentHeight, scroll, maxViewport;
         int tickCount;
         bool menuOpen;
@@ -68,6 +68,10 @@ namespace MiniAudio
         public event Action SettingsRequested;
         public event Action AutoToggled;
         public event Action SoftwareVolumeToggled;
+        public event Action ResetRequested; // reset the default output (see UsbReset)
+        public Func<AudioDevice, bool> CanReset = UsbReset.CanReset;
+        bool resetEnabled; // the default output is a USB device
+        readonly ToolTip tip = new ToolTip();
 
         public Flyout(AudioService audio, AppAudioService appAudio, Config config)
         {
@@ -273,9 +277,11 @@ namespace MiniAudio
 
             int fy = top + vh;
             footer = new Rectangle(0, fy, w, S(48));
-            autoToggle = new Rectangle(pad + S(6), fy + S(12), S(124), S(24));
-            softToggle = new Rectangle(autoToggle.Right + S(12), fy + S(12), S(158), S(24));
+            autoToggle = new Rectangle(pad + S(6), fy + S(12), S(122), S(24));
+            softToggle = new Rectangle(autoToggle.Right + S(8), fy + S(12), S(154), S(24));
             gear = new Rectangle(w - pad - S(36), fy + S(8), S(32), S(32));
+            reset = new Rectangle(gear.X - S(30), gear.Y, S(28), gear.Height);
+            resetEnabled = CanReset != null && CanReset(audio.GetDefault(EDataFlow.Render));
             ClientSize = new Size(w, fy + footer.Height);
         }
 
@@ -344,6 +350,7 @@ namespace MiniAudio
             if (tabApps.Contains(p)) { part = Part.TabApps; return null; }
             if (autoToggle.Contains(p)) { part = Part.AutoToggle; return null; }
             if (softToggle.Contains(p)) { part = Part.SoftToggle; return null; }
+            if (reset.Contains(p)) { part = Part.Reset; return null; }
             if (gear.Contains(p)) { part = Part.Gear; return null; }
             if (!viewport.Contains(p)) return null;
             foreach (var r in rows)
@@ -379,11 +386,16 @@ namespace MiniAudio
             var r = HitRow(e.Location, out part);
             if (r != hoverRow || part != hoverPart)
             {
+                bool resetTip = part == Part.Reset && hoverPart != Part.Reset;
+                if (hoverPart == Part.Reset && part != Part.Reset) tip.Hide(this);
                 hoverRow = r; hoverPart = part;
                 bool hand = part == Part.Mute || part == Part.Slider || part == Part.Balance || part == Part.AutoToggle
                          || part == Part.SoftToggle || part == Part.Gear || part == Part.TabDevices || part == Part.TabApps
-                         || (part == Part.Header && HeaderClickable(r));
+                         || (part == Part.Reset && resetEnabled) || (part == Part.Header && HeaderClickable(r));
                 Cursor = hand ? Cursors.Hand : Cursors.Default;
+                if (resetTip)
+                    tip.Show(resetEnabled ? "Reset device\nReconnects the default output as if it was unplugged and plugged back in"
+                                          : "Reset device\nOnly for USB outputs", this, S(10), footer.Y - S(44), 6000);
                 Invalidate();
             }
         }
@@ -391,6 +403,7 @@ namespace MiniAudio
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
+            if (hoverPart == Part.Reset) tip.Hide(this);
             if (dragRow == null) { hoverRow = null; hoverPart = Part.None; Invalidate(); }
         }
 
@@ -433,6 +446,12 @@ namespace MiniAudio
                 case Part.SoftToggle:
                     if (SoftwareVolumeToggled != null) SoftwareVolumeToggled();
                     Invalidate();
+                    break;
+                case Part.Reset:
+                    if (!resetEnabled) break;
+                    tip.Hide(this);
+                    HideFlyout();
+                    if (ResetRequested != null) ResetRequested();
                     break;
                 case Part.Gear:
                     HideFlyout();
@@ -795,6 +814,9 @@ namespace MiniAudio
 
             DrawToggle(g, autoToggle, "Auto switch", config.Auto, hoverPart == Part.AutoToggle);
             DrawToggle(g, softToggle, "Software volume", SoftwareId != null, hoverPart == Part.SoftToggle);
+
+            if (hoverPart == Part.Reset && resetEnabled) Theme.FillRound(g, theme.SurfaceStrong, reset, S(4f));
+            DrawText(g, Glyphs.Reset, fontGlyph, resetEnabled ? theme.Text : theme.Track, reset, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 
             if (hoverPart == Part.Gear) Theme.FillRound(g, theme.SurfaceStrong, gear, S(4f));
             DrawText(g, Glyphs.Settings, fontGlyph, theme.Text, gear, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
