@@ -8,6 +8,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Text;
@@ -40,7 +41,7 @@ namespace MiniAudio
         readonly Flyout flyout;
         readonly Osd osd;
         readonly HotkeyWindow hotkeyWin;
-        readonly Timer debounce, poll, softTimer;
+        readonly Timer debounce, poll, softTimer, resetTimer;
         readonly Dictionary<string, Icon> iconCache = new Dictionary<string, Icon>();
         SettingsForm settingsForm;
         string registeredHotkey;
@@ -66,6 +67,7 @@ namespace MiniAudio
             flyout.SettingsRequested += OpenSettings;
             flyout.AutoToggled += delegate { config.Auto = !config.Auto; config.Save(); };
             flyout.SoftwareVolumeToggled += delegate { ToggleSoftwareVolume(false); }; // the flyout shows the state itself
+            flyout.ResetRequested += ResetDevice;
 
             menu = new ContextMenuStrip();
             menu.Opening += delegate { BuildMenu(); };
@@ -91,6 +93,10 @@ namespace MiniAudio
             softTimer.Interval = 100;
             softTimer.Tick += delegate { if (!appAudio.ApplySoftwareVolume()) SoftwareVolumeEnded("Software volume off · device disconnected"); };
             SystemEvents.SessionEnding += OnSessionEnding;
+
+            resetTimer = new Timer(); // watches a device that is being reset until it is back
+            resetTimer.Interval = 150;
+            resetTimer.Tick += delegate { CheckReset(); };
 
             bool firstRun = config.IsNew;
             Evaluate();
@@ -126,10 +132,7 @@ namespace MiniAudio
             {
                 var d = audio.GetDefault(EDataFlow.Render);
                 if (d == null) return;
-                appAudio.SetSoftwareVolume(d);
-                softName = d.Name;
-                softGlyph = Glyphs.ForDevice(d);
-                softTimer.Start();
+                StartSoftwareVolume(d);
             }
             else StopSoftwareVolume();
             if (notice && config.ShowOsd) osd.ShowMessage(softGlyph, softName, on ? "Software volume on" : "Software volume off");
@@ -137,10 +140,19 @@ namespace MiniAudio
             flyout.Invalidate();
         }
 
+        void StartSoftwareVolume(AudioDevice d)
+        {
+            appAudio.SetSoftwareVolume(d);
+            softName = d.Name;
+            softGlyph = Glyphs.ForDevice(d);
+            softTimer.Start();
+        }
+
         void SoftwareVolumeEnded(string reason)
         {
             softTimer.Stop();
-            if (config.ShowOsd && softName != null) osd.ShowMessage(softGlyph, softName, reason);
+            // no notice during a reset: software volume is turned back on when the device returns
+            if (config.ShowOsd && softName != null && reset == null) osd.ShowMessage(softGlyph, softName, reason);
             UpdateTray();
             flyout.RefreshDevices();
         }
@@ -156,6 +168,85 @@ namespace MiniAudio
         {
             softTimer.Stop();
             appAudio.SetSoftwareVolume(null);
+        }
+
+        // ---- reset device ----
+
+        ResetWatch reset;   // a reset in progress: the device is leaving or on its way back
+        bool resetAsking;   // waiting for the copy that runs with administrator rights
+
+        // Reconnects the USB device of the default output as if it was unplugged and plugged back in (see UsbReset)
+        void ResetDevice()
+        {
+            if (reset != null || resetAsking) return;
+            var d = audio.GetDefault(EDataFlow.Render);
+            if (d == null || !UsbReset.CanReset(d)) return;
+
+            var watch = new ResetWatch();
+            watch.Id = d.Id;
+            watch.Name = d.Name;
+            watch.Glyph = Glyphs.ForDevice(d);
+            watch.Soft = string.Equals(appAudio.SoftwareDeviceId, d.Id, StringComparison.OrdinalIgnoreCase);
+
+            Process p;
+            try { p = UsbReset.StartElevated(d.Id); }
+            catch (Win32Exception) { return; } // declined at the administrator prompt
+            if (p == null) return;
+            resetAsking = true;
+            p.EnableRaisingEvents = true;
+            p.Exited += delegate
+            {
+                // runs on a worker thread, where an exception would close MiniAudio
+                try
+                {
+                    int code = p.ExitCode;
+                    p.Dispose();
+                    invoker.BeginInvoke((Action)delegate { ResetStarted(watch, code); });
+                }
+                catch { }
+            };
+        }
+
+        void ResetStarted(ResetWatch watch, int exitCode)
+        {
+            resetAsking = false;
+            if (exitCode != 0)
+            {
+                tray.ShowBalloonTip(4000, "MiniAudio", watch.Name + " could not be reset.", ToolTipIcon.Warning);
+                return;
+            }
+            watch.StartTick = Environment.TickCount;
+            reset = watch;
+            resetTimer.Start();
+            if (config.ShowOsd) osd.ShowMessage(watch.Glyph, watch.Name, "Resetting · reconnecting…");
+        }
+
+        // The device is back: it is the default output again, with software volume if it had it. Sessions
+        // lowered by software volume come back lowered, so turning it on again right away keeps the level.
+        void CheckReset()
+        {
+            if (reset == null) { resetTimer.Stop(); return; }
+            AudioDevice d = null;
+            foreach (var o in audio.GetDevices(EDataFlow.Render, DeviceState.Active))
+                if (string.Equals(o.Id, reset.Id, StringComparison.OrdinalIgnoreCase)) d = o;
+            var step = reset.Next(unchecked(Environment.TickCount - reset.StartTick), d != null);
+            if (step == ResetWatch.Step.Wait) return;
+
+            var done = reset;
+            reset = null;
+            resetTimer.Stop();
+            if (step != ResetWatch.Step.Back)
+            {
+                tray.ShowBalloonTip(5000, "MiniAudio", done.Name + (step == ResetWatch.Step.Lost
+                    ? " did not come back after the reset. Unplug it and plug it back in."
+                    : " did not react to the reset. Unplug it and plug it back in instead."), ToolTipIcon.Warning);
+                return;
+            }
+            if (done.Soft && appAudio.SoftwareDeviceId == null) StartSoftwareVolume(d);
+            if (!string.Equals(audio.GetDefaultId(EDataFlow.Render, ERole.Console), d.Id, StringComparison.OrdinalIgnoreCase)) SwitchTo(d, null);
+            if (config.ShowOsd) osd.ShowMessage(done.Glyph, done.Name, done.Soft ? "Reset done · Software volume is still on" : "Reset done");
+            UpdateTray();
+            flyout.RefreshDevices();
         }
 
         // ---- auto switching ----
@@ -196,6 +287,7 @@ namespace MiniAudio
             knownActive = active;
             initialized = true;
 
+            if (reset != null) reason = null; // a reset shows its own notices
             if (target != null && !string.Equals(target.Id, cur, StringComparison.OrdinalIgnoreCase))
             {
                 if (SwitchTo(target, reason)) cur = target.Id;
@@ -324,6 +416,12 @@ namespace MiniAudio
             soft.Enabled = soft.Checked || cur != null;
             soft.Click += delegate { ToggleSoftwareVolume(true); };
             menu.Items.Add(soft);
+            var resetItem = new ToolStripMenuItem("Reset device");
+            resetItem.ToolTipText = "Reconnects the default output as if it was unplugged and plugged back in (USB only). Asks for administrator rights.";
+            resetItem.Enabled = reset == null && !resetAsking
+                && UsbReset.CanReset(outs.Find(delegate(AudioDevice d) { return string.Equals(d.Id, cur, StringComparison.OrdinalIgnoreCase); }));
+            resetItem.Click += delegate { ResetDevice(); };
+            menu.Items.Add(resetItem);
 
             menu.Items.Add(new ToolStripSeparator());
             var auto = new ToolStripMenuItem("Auto switch");
@@ -397,6 +495,7 @@ namespace MiniAudio
             SystemEvents.SessionEnding -= OnSessionEnding;
             poll.Stop();
             debounce.Stop();
+            resetTimer.Stop();
             Win32.UnregisterHotKey(hotkeyWin.Handle, HotkeyId);
             hotkeyWin.DestroyHandle();
             audio.Dispose();

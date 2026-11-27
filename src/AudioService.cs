@@ -18,6 +18,7 @@ namespace MiniAudio
         public string FriendlyName;  // full name as Windows shows it
         public string InterfaceName; // physical device it belongs to (used for mic matching)
         public string Bus;           // "Bluetooth", "USB" or ""
+        public string ParentInstance; // device the endpoint hangs on: "USB\VID_1038&PID_227E&MI_00\7&3160C799&0&0000"
         public int FormFactor;
         public bool HandsFree;       // Bluetooth call profile (HFP): mono, low quality
 
@@ -240,6 +241,8 @@ namespace MiniAudio
             d.FormFactor = GetUInt(ps, PropKeys.FormFactor);
             string parent = (GetString(ps, PropKeys.ParentInstance) ?? "").ToUpperInvariant();
             Marshal.ReleaseComObject(ps);
+            int dot = parent.StartsWith("{") ? parent.IndexOf("}.") : -1; // the store prefixes the id: "{1}.USB\VID_..."
+            d.ParentInstance = dot > 0 ? parent.Substring(dot + 2) : parent;
 
             if (parent.Contains("BTHENUM") || parent.Contains("BTHHFENUM") || parent.Contains("BTHLE")) d.Bus = "Bluetooth";
             else if (parent.Contains("USB\\")) d.Bus = "USB";

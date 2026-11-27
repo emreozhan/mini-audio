@@ -5,6 +5,7 @@
 //   MiniAudio.exe --list               list devices
 //   MiniAudio.exe --switch <name|id>   make the device whose name contains <name> (or whose id matches) the default
 //   MiniAudio.exe --next               switch to the next output in the list
+//   MiniAudio.exe --reset [name|id]    reconnect the USB device of an output (asks for administrator rights)
 
 using System;
 using System.Collections.Generic;
@@ -66,16 +67,42 @@ namespace MiniAudio
             if (cmd == "--switch" && args.Length > 1)
             {
                 string q = string.Join(" ", args, 1, args.Length - 1);
-                AudioDevice match = null;
-                foreach (var flow in new[] { EDataFlow.Render, EDataFlow.Capture })
-                    foreach (var d in audio.GetDevices(flow, DeviceState.Active))
-                        if (match == null && (string.Equals(d.Id, q, StringComparison.OrdinalIgnoreCase)
-                            || d.FriendlyName.IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0
-                            || d.Name.IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0))
-                            match = d;
+                AudioDevice match = FindDevice(audio, q);
                 if (match == null) { Console.WriteLine("No matching active device: " + q); return 1; }
                 bool ok = Switcher.Apply(audio, config, match);
                 Console.WriteLine((ok ? "Default set: " : "Failed: ") + match.FriendlyName);
+                return ok ? 0 : 1;
+            }
+
+            if (cmd == "--reset")
+            {
+                // Reconnects the USB device of an output as if it was unplugged and plugged back in (see UsbReset)
+                string q = args.Length > 1 ? string.Join(" ", args, 1, args.Length - 1) : null;
+                AudioDevice d = q != null ? FindDevice(audio, q) : audio.GetDefault(EDataFlow.Render);
+                if (d == null) { Console.WriteLine(q != null ? "No matching active device: " + q : "No active output device."); return 1; }
+                string usb = UsbReset.FindDevice(d);
+                if (usb == null) { Console.WriteLine(d.Name + " is not a USB device; there is nothing to reset."); return 1; }
+
+                bool ok;
+                if (UsbReset.IsElevated()) ok = UsbReset.Reset(usb);
+                else
+                {
+                    // Windows asks for administrator rights; that copy does the reset
+                    try
+                    {
+                        using (var p = UsbReset.StartElevated(d.Id))
+                        {
+                            p.WaitForExit();
+                            ok = p.ExitCode == 0;
+                        }
+                    }
+                    catch (System.ComponentModel.Win32Exception)
+                    {
+                        Console.WriteLine("Cancelled: resetting a device needs administrator rights.");
+                        return 1;
+                    }
+                }
+                Console.WriteLine(ok ? "Reset: " + d.Name + " (it reconnects in a few seconds)" : "Failed: " + d.Name + " could not be reset.");
                 return ok ? 0 : 1;
             }
 
@@ -199,8 +226,20 @@ namespace MiniAudio
                 return 0;
             }
 
-            Console.WriteLine("Usage: MiniAudio.exe [--list | --switch <name|id> | --next | --apps | --route <app> <device|default> | --balance <app> <-100..100>]");
+            Console.WriteLine("Usage: MiniAudio.exe [--list | --switch <name|id> | --next | --reset [name|id] | --apps | --route <app> <device|default> | --balance <app> <-100..100>]");
             return 2;
+        }
+
+        // First active device whose id matches or whose name contains the text
+        static AudioDevice FindDevice(AudioService audio, string q)
+        {
+            foreach (var flow in new[] { EDataFlow.Render, EDataFlow.Capture })
+                foreach (var d in audio.GetDevices(flow, DeviceState.Active))
+                    if (string.Equals(d.Id, q, StringComparison.OrdinalIgnoreCase)
+                        || d.FriendlyName.IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0
+                        || d.Name.IndexOf(q, StringComparison.CurrentCultureIgnoreCase) >= 0)
+                        return d;
+            return null;
         }
     }
 }

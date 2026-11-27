@@ -120,6 +120,7 @@ namespace MiniAudio
         public const string Volume0 = "", Volume1 = "", Volume2 = "", Volume3 = "";
         public const string Mute = "", Headphones = "", Speakers = "", Monitor = "";
         public const string Microphone = "", MicOff = "", Settings = "", Headset = "";
+        public const string Reset = "";
 
         static string family;
 
